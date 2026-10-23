@@ -457,7 +457,7 @@
   <header>
     <div>
       <h1>CARTA Open Data Explorer</h1>
-      <p>Point-and-click reports, custom filters, and local AI search powered by DuckDB in your browser</p>
+      <p>Point-and-click reports, custom filters, and plain-English search powered by DuckDB in your browser</p>
     </div>
     <div class="status-badge">
       <span id="dbStatusDot" class="status-dot"></span>
@@ -469,7 +469,7 @@
     <div class="tabs">
       <button class="tab-btn active" data-tab="panel-presets">1. One-Click Reports</button>
       <button class="tab-btn" data-tab="panel-builder">2. Visual Filter Builder</button>
-      <button class="tab-btn" data-tab="panel-ai">3. Ask in Plain English (Local AI)</button>
+      <button class="tab-btn" data-tab="panel-ai">3. Ask in Plain English</button>
     </div>
 
     <!-- TAB 1: ONE-CLICK PRESETS -->
@@ -540,50 +540,52 @@
       </div>
     </section>
 
-    <!-- TAB 3: PLAIN ENGLISH LOCAL AI -->
+    <!-- TAB 3: ASK IN PLAIN ENGLISH (GROQ AI) -->
     <section id="panel-ai" class="panel">
       <h2>Ask a Question in Plain English</h2>
       <p class="panel-subtitle">
-        Translates plain-English questions into DuckDB SQL using live column names from CARTA's datasets.
-        Works instantly out of the box, with optional Local Ollama or WebGPU model support.
+        Powered by <strong>Groq (OpenAI GPT-OSS 120B / 20B)</strong>.
+        Only table and column names are sent to Groq; your SQL runs locally in DuckDB.
       </p>
 
       <div class="ai-setup-bar">
-        <div class="form-group" style="min-width: 320px;">
-          <label for="aiEngineMode">Translation Engine</label>
-          <select id="aiEngineMode">
-            <option value="builtin" selected>Built-In Smart SQL Translator (Instant, No Download, Recommended)</option>
-            <option value="ollama">Local Ollama Server (http://localhost:11434, qwen2.5-coder:3b)</option>
-            <option value="webgpu-0.5b">Experimental WebGPU: Qwen2.5-Coder-0.5B (~900 MB)</option>
-            <option value="webgpu-1.5b">Experimental WebGPU: Qwen2.5-Coder-1.5B (~1.5 GB)</option>
-          </select>
+        <div class="form-group" style="flex: 1; min-width: 260px;">
+          <label for="groqApiKeyInput">
+            Groq API Key (Free at
+            <a href="https://console.groq.com/keys" target="_blank" rel="noopener" style="color: var(--carta-blue);">
+              console.groq.com/keys
+            </a>)
+          </label>
+          <input
+            type="password"
+            id="groqApiKeyInput"
+            placeholder="gsk_..."
+            autocomplete="off"
+          />
         </div>
-        <button id="initAiBtn" class="btn" style="display: none;">Connect / Load Engine</button>
-        <span id="aiStatusText" style="font-size: 0.85rem; color: var(--muted);">
-          Ready: Built-in schema-aware SQL translator active.
-        </span>
-        <div id="aiProgressWrap" class="progress-bar-wrap">
-          <div id="aiProgressFill" class="progress-bar-fill"></div>
-        </div>
+        <button id="saveGroqKeyBtn" class="btn btn-secondary">Save Key</button>
+        <span id="groqKeyStatus" style="font-size: 0.85rem; color: var(--muted);"></span>
       </div>
 
       <div class="chip-row">
         <span style="font-size: 0.8rem; color: var(--muted); align-self: center;">Try an example:</span>
         <button class="chip" data-prompt="Show all bus routes from simple_bus_routes">List all bus routes</button>
-        <button class="chip" data-prompt="Show 25 recent vehicle locations from clever_vehicle_locations_v1">Recent Clever vehicle locations</button>
         <button class="chip" data-prompt="Show the top 20 Bike Chattanooga stations ordered by capacity">Bike stations by capacity</button>
-        <button class="chip" data-prompt="Show monthly ridership records from ntd_monthly_ridership_v1">Monthly ridership summary</button>
+        <button class="chip" data-prompt="Show bus stops with Market in the name">Bus stops on Market</button>
+        <button class="chip" data-prompt="Show CARTA monthly ridership by Date and Mode from ntd_monthly_ridership_v1">CARTA monthly ridership</button>
+        <button class="chip" data-prompt="What is the total UPT ridership for Chattanooga by Mode in ntd_monthly_ridership_v1?">Total ridership by mode (SUM)</button>
       </div>
 
       <div style="display: flex; gap: 0.65rem; flex-wrap: wrap;">
         <input
           type="text"
           id="aiQuestionInput"
-          placeholder="Type what you want to find (e.g., 'Show all bus stops with Market in the name')..."
+          placeholder="Ask any question (e.g., 'What is the average capacity of Bike Chattanooga stations?' or 'Show CARTA ridership in 2024')..."
           style="flex: 1; min-width: 260px;"
         />
         <button id="askAiBtn" class="btn" disabled>Ask AI &amp; Run</button>
       </div>
+      <div id="aiStatusText" style="margin-top: 0.6rem; font-size: 0.85rem; color: var(--muted);"></div>
     </section>
 
     <!-- RESULTS TABLE -->
@@ -738,10 +740,10 @@
         sql: "SELECT * FROM data.simple_bus_stops LIMIT 250;"
       },
       {
-        title: "Monthly Ridership Report (NTD)",
+        title: "CARTA Monthly Ridership (NTD)",
         tag: "Management",
-        desc: "View National Transit Database monthly ridership figures.",
-        sql: "SELECT * FROM data.ntd_monthly_ridership_v1 LIMIT 200;"
+        desc: "View CARTA / Chattanooga monthly ridership figures reported to the NTD.",
+        sql: "SELECT * FROM data.ntd_monthly_ridership_v1 WHERE \"Agency\" ILIKE '%Chattanooga%' OR \"UZA Name\" ILIKE '%Chattanooga%' ORDER BY \"Date\" DESC LIMIT 200;"
       },
       {
         title: "Bike Chattanooga Stations",
@@ -758,8 +760,6 @@
     const schemaCache = {}; // viewName -> [{ name, type }]
     let currentRows = [];
     let currentColumns = [];
-    let webllmEngine = null;
-    let loadedWebllmModel = null;
 
     // DOM elements
     const dbStatusDot = document.getElementById("dbStatusDot");
@@ -781,14 +781,35 @@
     const exportCsvBtn = document.getElementById("exportCsvBtn");
     const quickSearchInput = document.getElementById("quickSearchInput");
 
-    // AI DOM elements
-    const aiEngineMode = document.getElementById("aiEngineMode");
-    const initAiBtn = document.getElementById("initAiBtn");
+    // Plain-English Search DOM elements
+    const groqApiKeyInput = document.getElementById("groqApiKeyInput");
+    const saveGroqKeyBtn = document.getElementById("saveGroqKeyBtn");
+    const groqKeyStatus = document.getElementById("groqKeyStatus");
     const aiStatusText = document.getElementById("aiStatusText");
-    const aiProgressWrap = document.getElementById("aiProgressWrap");
-    const aiProgressFill = document.getElementById("aiProgressFill");
     const aiQuestionInput = document.getElementById("aiQuestionInput");
     const askAiBtn = document.getElementById("askAiBtn");
+
+    // Load saved Groq API key from localStorage
+    const GROQ_STORAGE_KEY = "carta_groq_api_key";
+    let preferredGroqModel = null;
+    const savedGroqKey = localStorage.getItem(GROQ_STORAGE_KEY) || "";
+    if (savedGroqKey) {
+      groqApiKeyInput.value = savedGroqKey;
+      groqKeyStatus.textContent = "Groq API key saved in browser (GPT-OSS 120B ready).";
+    } else {
+      groqKeyStatus.textContent = "Enter a free Groq API key for full AI SQL generation.";
+    }
+
+    saveGroqKeyBtn.addEventListener("click", () => {
+      const key = groqApiKeyInput.value.trim();
+      if (key) {
+        localStorage.setItem(GROQ_STORAGE_KEY, key);
+        groqKeyStatus.textContent = "Groq API key saved in browser (GPT-OSS 120B ready).";
+      } else {
+        localStorage.removeItem(GROQ_STORAGE_KEY);
+        groqKeyStatus.textContent = "Key cleared.";
+      }
+    });
 
     // Setup Tabs
     document.querySelectorAll(".tab-btn").forEach((btn) => {
@@ -861,9 +882,7 @@
         dbStatusText.textContent = `Connected (${availableViews.length} CARTA datasets ready)`;
         runBuilderBtn.disabled = false;
         runCustomSqlBtn.disabled = false;
-        if (aiEngineMode.value === "builtin") {
-          askAiBtn.disabled = false;
-        }
+        askAiBtn.disabled = false;
       } catch (err) {
         console.error(err);
         dbStatusDot.classList.add("error");
@@ -1079,7 +1098,7 @@
     }
 
     // =========================================================================
-    // PLAIN ENGLISH TO SQL (Built-In Schema-Aware Translator + Optional Ollama/WebGPU)
+    // PLAIN ENGLISH TO SQL (Schema-Aware Natural Language Translator)
     // =========================================================================
     const VIEW_KEYWORDS = {
       bike_chattanooga_stations_v1: ["bike", "chattanooga", "station", "stations", "dock", "docks", "capacity", "bikes", "bikeshare"],
@@ -1097,87 +1116,6 @@
       hamilton_county_parcels_v1: ["parcel", "parcels", "property", "hamilton", "land", "tax"],
       tn_ng911_address_points: ["address", "addresses", "911", "ng911", "street"]
     };
-
-    aiEngineMode.addEventListener("change", () => {
-      const mode = aiEngineMode.value;
-      hideError();
-      if (mode === "builtin") {
-        initAiBtn.style.display = "none";
-        aiProgressWrap.style.display = "none";
-        aiStatusText.textContent = "Ready: Built-in schema-aware SQL translator active.";
-        if (conn) askAiBtn.disabled = false;
-      } else {
-        initAiBtn.style.display = "inline-flex";
-        aiStatusText.textContent = "Click 'Connect / Load Engine' to initialize.";
-      }
-    });
-
-    initAiBtn.addEventListener("click", async () => {
-      const mode = aiEngineMode.value;
-      hideError();
-      if (mode === "builtin") {
-        askAiBtn.disabled = false;
-        return;
-      }
-
-      if (mode === "ollama") {
-        aiStatusText.textContent = "Testing connection to local Ollama (http://localhost:11434)...";
-        try {
-          const res = await fetch("http://localhost:11434/api/tags");
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          aiStatusText.textContent = "Connected to Local Ollama (qwen2.5-coder:3b ready)";
-          askAiBtn.disabled = false;
-        } catch (err) {
-          showError(
-            "Could not reach Ollama at http://localhost:11434.\nMake sure Ollama is running with: $env:OLLAMA_ORIGINS=\"*\"; ollama serve\nand that you have run: ollama pull qwen2.5-coder:3b"
-          );
-          aiStatusText.textContent = "Ollama connection failed.";
-        }
-        return;
-      }
-
-      const modelId =
-        mode === "webgpu-0.5b"
-          ? "Qwen2.5-Coder-0.5B-Instruct-q4f16_1-MLC"
-          : "Qwen2.5-Coder-1.5B-Instruct-q4f16_1-MLC";
-
-      try {
-        initAiBtn.disabled = true;
-        aiProgressWrap.style.display = "block";
-        aiProgressFill.style.width = "2%";
-        aiStatusText.textContent = `Loading ${modelId} into WebGPU...`;
-
-        const webllm = await import("https://esm.run/@mlc-ai/web-llm");
-        webllmEngine = await webllm.CreateMLCEngine(
-          modelId,
-          {
-            initProgressCallback: (report) => {
-              aiStatusText.textContent = report.text;
-              if (typeof report.progress === "number") {
-                aiProgressFill.style.width = `${Math.round(report.progress * 100)}%`;
-              }
-            }
-          },
-          {
-            context_window_size: 1024
-          }
-        );
-
-        loadedWebllmModel = modelId;
-        aiProgressWrap.style.display = "none";
-        aiStatusText.textContent = `Ready: ${modelId} loaded`;
-        askAiBtn.disabled = false;
-      } catch (err) {
-        console.error(err);
-        aiProgressWrap.style.display = "none";
-        aiStatusText.textContent = "WebGPU unavailable; using Built-In Smart SQL Translator.";
-        aiEngineMode.value = "builtin";
-        initAiBtn.style.display = "none";
-        askAiBtn.disabled = false;
-      } finally {
-        initAiBtn.disabled = false;
-      }
-    });
 
     // Example prompt chips
     document.querySelectorAll(".chip").forEach((chip) => {
@@ -1268,19 +1206,30 @@
       return bestScore > 0 ? bestCol : null;
     }
 
+    function translateNtdFilterTerm(rawVal) {
+      const norm = rawVal.trim().toLowerCase();
+      if (norm === "hamilton county" || norm === "hamilton" || norm === "carta") {
+        return "Chattanooga";
+      }
+      return rawVal.trim();
+    }
+
     async function translateQuestionToSql(question) {
       const viewName = matchBestView(question);
       aiStatusText.textContent = `Inspecting schema for ${viewName}...`;
       const cols = await getColumnsForView(viewName);
       const qLower = question.toLowerCase();
 
+      // Remove trailing "from <table_name>" so it doesn't interfere with filter/sort matching
+      const cleanQ = question.replace(/\s+from\s+(?:data\.)?[a-zA-Z0-9_]+/gi, "").trim();
+
       // 1. Check if user is asking for a row count
-      if (/\b(how many|count of|total number of)\b/i.test(question)) {
+      if (/\b(how many|count of|total number of)\b/i.test(cleanQ)) {
         return `SELECT COUNT(*) AS total_records FROM data.${viewName};`;
       }
 
       // 2. Extract row limit (ignore numbers attached to v1 or 911)
-      const qWithoutView = question.replace(new RegExp(viewName, "gi"), "").replace(/\b911\b/g, "");
+      const qWithoutView = cleanQ.replace(new RegExp(viewName, "gi"), "").replace(/\b911\b/g, "");
       const limitMatch =
         qWithoutView.match(/\b(?:top|first|show|limit|last|recent)\s+(\d{1,4})\b/i) ||
         qWithoutView.match(/\b(\d{1,4})\s+(?:rows|records|stations|routes|stops|locations|vehicles|trips)\b/i);
@@ -1289,11 +1238,13 @@
       // 3. Check for filter criteria
       let whereClause = "";
       // Pattern A: "with <VAL> in the <COL>" (e.g., "with Market in the name")
-      const withInMatch = question.match(/\bwith\s+['"]?([a-zA-Z0-9_\-\s]+?)['"]?\s+in\s+(?:the\s+)?([a-zA-Z0-9_]+)\b/i);
+      const withInMatch = cleanQ.match(/\bwith\s+['"]?([a-zA-Z0-9_\-\s]+?)['"]?\s+in\s+(?:the\s+)?([a-zA-Z0-9_]+)\b/i);
       // Pattern B: "where <COL> is/equals/contains <VAL>"
-      const whereMatch = question.match(/\bwhere\s+([a-zA-Z0-9_\s]+?)\s+(?:is|equals|=|contains|like)\s+['"]?([a-zA-Z0-9_\-]+)['"]?/i);
+      const whereMatch = cleanQ.match(/\bwhere\s+([a-zA-Z0-9_\s]+?)\s+(?:is|equals|=|contains|like)\s+['"]?([a-zA-Z0-9_\-\s]+?)['"]?(?:\s+(?:ordered|order|sorted|sort|by|limit)\b|$)/i);
       // Pattern C: "containing '<VAL>'" or "named '<VAL>'"
-      const namedMatch = question.match(/\b(?:named|containing|called)\s+['"]?([a-zA-Z0-9_\-]+)['"]?/i);
+      const namedMatch = cleanQ.match(/\b(?:named|containing|called)\s+['"]?([a-zA-Z0-9_\-\s]+?)['"]?(?:\s+(?:ordered|order|sorted|sort|by|limit)\b|$)/i);
+      // Pattern D: "for <VAL>" or "on <VAL>" (e.g., "for Hamilton County", "for Chattanooga", "on Market")
+      const forMatch = cleanQ.match(/\b(?:for|on)\s+['"]?([a-zA-Z0-9_\-\s]+?)['"]?(?:\s+(?:ordered|order|sorted|sort|by|limit)\b|$)/i);
 
       if (withInMatch) {
         const val = withInMatch[1].trim().replace(/'/g, "''");
@@ -1307,26 +1258,34 @@
         if (col && val) {
           whereClause = ` WHERE CAST("${col}" AS VARCHAR) ILIKE '%${val}%'`;
         }
-      } else if (namedMatch) {
-        const val = namedMatch[1].trim().replace(/'/g, "''");
-        const col = cols.find((c) => /name|title|route|stop/i.test(c.name))?.name || cols[0]?.name;
-        if (col && val) {
-          whereClause = ` WHERE CAST("${col}" AS VARCHAR) ILIKE '%${val}%'`;
+      } else if (namedMatch || forMatch) {
+        const rawVal = (namedMatch ? namedMatch[1] : forMatch[1]).trim();
+        if (viewName === "ntd_monthly_ridership_v1") {
+          const ntdVal = translateNtdFilterTerm(rawVal).replace(/'/g, "''");
+          whereClause = ` WHERE ("Agency" ILIKE '%${ntdVal}%' OR "UZA Name" ILIKE '%${ntdVal}%')`;
+        } else {
+          const val = rawVal.replace(/'/g, "''");
+          const col = cols.find((c) => /name|title|agency|route|stop|address|street/i.test(c.name))?.name || cols[0]?.name;
+          if (col && val) {
+            whereClause = ` WHERE CAST("${col}" AS VARCHAR) ILIKE '%${val}%'`;
+          }
         }
+      } else if (viewName === "ntd_monthly_ridership_v1" && /\b(chattanooga|hamilton|carta)\b/i.test(cleanQ)) {
+        whereClause = ` WHERE ("Agency" ILIKE '%Chattanooga%' OR "UZA Name" ILIKE '%Chattanooga%')`;
       }
 
       // 4. Check for ORDER BY criteria
       let orderClause = "";
-      const orderMatch = question.match(/\b(?:ordered\s+by|order\s+by|sorted\s+by|sort\s+by|by)\s+([a-zA-Z0-9_\s]+?)(?:\s+(asc|desc|ascending|descending))?$/i);
+      const orderMatch = cleanQ.match(/\b(?:ordered\s+by|order\s+by|sorted\s+by|sort\s+by|by)\s+([a-zA-Z0-9_\s]+?)(?:\s+(asc|desc|ascending|descending))?$/i);
       if (orderMatch) {
         const col = findMatchingColumn(cols, orderMatch[1]);
         if (col) {
-          const explicitAsc = /\b(asc|ascending|lowest|smallest|oldest|least)\b/i.test(question);
-          const explicitDesc = /\b(desc|descending|top|highest|most|largest|biggest|recent|latest|newest)\b/i.test(question);
+          const explicitAsc = /\b(asc|ascending|lowest|smallest|oldest|least)\b/i.test(cleanQ);
+          const explicitDesc = /\b(desc|descending|top|highest|most|largest|biggest|recent|latest|newest)\b/i.test(cleanQ);
           const dir = explicitAsc ? "ASC" : explicitDesc ? "DESC" : "DESC";
           orderClause = ` ORDER BY "${col}" ${dir}`;
         }
-      } else if (/\b(recent|latest|newest)\b/i.test(qLower)) {
+      } else if (/\b(recent|latest|newest)\b/i.test(qLower) || viewName === "ntd_monthly_ridership_v1") {
         const timeCol = cols.find((c) => /time|date|timestamp|updated|created|year/i.test(c.name))?.name;
         if (timeCol) {
           orderClause = ` ORDER BY "${timeCol}" DESC`;
@@ -1336,64 +1295,39 @@
       return `SELECT * FROM data.${viewName}${whereClause}${orderClause} LIMIT ${limit};`;
     }
 
-    async function buildSchemaPromptForQuestion(question) {
-      const bestView = matchBestView(question);
-      try {
-        aiStatusText.textContent = `Reading columns for ${bestView}...`;
-        const cols = await getColumnsForView(bestView);
-        const colStr = cols.map((c) => `"${c.name}" (${c.type})`).join(", ");
-        return `Table data.${bestView} has columns: ${colStr}`;
-      } catch {
-        return `Table data.${bestView}`;
-      }
-    }
+    async function buildGroqSchemaPrompt(question) {
+      const qLower = question.toLowerCase();
+      const primaryView = matchBestView(question);
+      const selected = new Set([primaryView]);
 
-    async function generateSqlWithAi(systemPrompt, userPrompt) {
-      const mode = aiEngineMode.value;
-      if (mode === "builtin") {
-        return translateQuestionToSql(userPrompt);
-      }
-      if (mode === "ollama") {
-        const res = await fetch("http://localhost:11434/api/chat", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            model: "qwen2.5-coder:3b",
-            stream: false,
-            options: { temperature: 0 },
-            messages: [
-              { role: "system", content: systemPrompt },
-              { role: "user", content: userPrompt }
-            ]
-          })
-        });
-        if (!res.ok) throw new Error(`Ollama returned HTTP ${res.status}`);
-        const data = await res.json();
-        return extractSql(data.message?.content || "");
-      } else {
-        await webllmEngine.resetChat();
-        const chunks = await webllmEngine.chat.completions.create({
-          temperature: 0,
-          max_tokens: 128,
-          stream: true,
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: userPrompt }
-          ]
-        });
-        let rawReply = "";
-        for await (const chunk of chunks) {
-          const delta = chunk.choices[0]?.delta?.content || "";
-          rawReply += delta;
-          sqlQueryBox.value = rawReply;
-          aiStatusText.textContent = `Generating SQL: ${rawReply.slice(0, 60)}...`;
+      // Add up to 2 additional related views so token usage stays around ~250 tokens/query
+      for (const v of availableViews) {
+        if (selected.size >= 3) break;
+        const kws = VIEW_KEYWORDS[v] || [];
+        if (qLower.includes(v.toLowerCase()) || kws.some((kw) => qLower.includes(kw))) {
+          selected.add(v);
         }
-        return extractSql(rawReply);
       }
+
+      const lines = [];
+      for (const v of selected) {
+        try {
+          const cols = await getColumnsForView(v);
+          const colStr = cols.map((c) => `"${c.name}" (${c.type})`).join(", ");
+          lines.push(`Table data.${v}: ${colStr}`);
+        } catch {
+          lines.push(`Table data.${v}`);
+        }
+      }
+      const otherViews = availableViews.filter((v) => !selected.has(v)).map((v) => `data.${v}`).join(", ");
+      if (otherViews) {
+        lines.push(`Other available tables: ${otherViews}`);
+      }
+      return lines.join("\n");
     }
 
     function extractSql(raw) {
-      let cleaned = raw.trim();
+      let cleaned = raw.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
       const fenceMatch = cleaned.match(/```(?:sql)?\s*([\s\S]*?)```/i);
       if (fenceMatch) {
         cleaned = fenceMatch[1].trim();
@@ -1405,51 +1339,143 @@
       return cleaned;
     }
 
+    async function callGroqChat(apiKey, model, systemPrompt, userPrompt) {
+      const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+          model,
+          temperature: 0,
+          max_tokens: 1024,
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userPrompt }
+          ]
+        })
+      });
+      return res;
+    }
+
+    async function discoverAvailableGroqModel(apiKey) {
+      const res = await fetch("https://api.groq.com/openai/v1/models", {
+        headers: { "Authorization": `Bearer ${apiKey}` }
+      });
+      if (!res.ok) return null;
+      const data = await res.json();
+      const models = (data.data || []).map((m) => m.id);
+      const preferredOrder = [
+        "openai/gpt-oss-120b",
+        "openai/gpt-oss-20b",
+        "qwen/qwen3.8-27b"
+      ];
+      for (const p of preferredOrder) {
+        if (models.includes(p)) return p;
+      }
+      return models.find((id) => !/whisper|orpheus|guard|safeguard|tts|embed/i.test(id)) || null;
+    }
+
+    async function generateSqlWithGroq(apiKey, question, retryError = "") {
+      const schemaText = await buildGroqSchemaPrompt(question);
+      const systemPrompt = `You are a DuckDB SQL expert for Chattanooga Area Regional Transportation Authority (CARTA).
+Write a single valid DuckDB SQL query to answer the user's question. Output ONLY the SQL query, with no explanation or markdown.
+Rules:
+1. Always prefix table names with data. (for example: data.simple_bus_routes).
+2. Always wrap column names in double quotes (for example: "Legacy NTD ID", "UZA Name", "UPT").
+3. In data.ntd_monthly_ridership_v1 (national NTD dataset), filter for CARTA / Chattanooga / Hamilton County using: WHERE ("Agency" ILIKE '%Chattanooga%' OR "UZA Name" ILIKE '%Chattanooga%').
+4. Include LIMIT 100 unless the query is an aggregation (COUNT, SUM, AVG, GROUP BY) or the user requests a specific limit.
+
+Schema:
+${schemaText}`;
+
+      const userPrompt = retryError
+        ? `Question: ${question}\nPrevious SQL failed in DuckDB with error: ${retryError}\nFix the DuckDB SQL query using only the exact column names listed in Schema.`
+        : question;
+
+      const candidates = preferredGroqModel
+        ? [preferredGroqModel, "openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.8-27b"]
+        : ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.8-27b"];
+      const uniqueCandidates = [...new Set(candidates)];
+
+      let lastRes = null;
+      let usedModel = uniqueCandidates[0];
+
+      for (const candidate of uniqueCandidates) {
+        usedModel = candidate;
+        aiStatusText.textContent = `Generating SQL with Groq (${usedModel})...`;
+        const res = await callGroqChat(apiKey, usedModel, systemPrompt, userPrompt);
+        lastRes = res;
+        if (res.ok) {
+          preferredGroqModel = usedModel;
+          const data = await res.json();
+          const sql = extractSql(data.choices?.[0]?.message?.content || "");
+          return { sql, usedModel };
+        }
+        if (res.status !== 404 && res.status !== 429 && res.status !== 400) {
+          break;
+        }
+      }
+
+      // Dynamic fallback via /openai/v1/models if default candidates were not found
+      const discovered = await discoverAvailableGroqModel(apiKey);
+      if (discovered && !uniqueCandidates.includes(discovered)) {
+        usedModel = discovered;
+        aiStatusText.textContent = `Generating SQL with Groq (${usedModel})...`;
+        const res = await callGroqChat(apiKey, usedModel, systemPrompt, userPrompt);
+        lastRes = res;
+        if (res.ok) {
+          preferredGroqModel = usedModel;
+          const data = await res.json();
+          const sql = extractSql(data.choices?.[0]?.message?.content || "");
+          return { sql, usedModel };
+        }
+      }
+
+      const errBody = lastRes ? await lastRes.text() : "Unknown error";
+      throw new Error(`Groq API error (HTTP ${lastRes?.status}): ${errBody}`);
+    }
+
     askAiBtn.addEventListener("click", async () => {
       const question = aiQuestionInput.value.trim();
       if (!question) return;
 
+      const apiKey = groqApiKeyInput.value.trim();
+      if (apiKey) {
+        localStorage.setItem(GROQ_STORAGE_KEY, apiKey);
+        groqKeyStatus.textContent = "Groq API key saved in browser.";
+      }
+
       askAiBtn.disabled = true;
       hideError();
       try {
-        let sql = "";
-        if (aiEngineMode.value === "builtin") {
-          sql = await translateQuestionToSql(question);
-        } else {
-          try {
-            const schemaText = await buildSchemaPromptForQuestion(question);
-            const systemPrompt = `You write DuckDB SQL queries. Output ONLY the SQL query, with no explanation.
-Rules:
-- Always prefix tables with data. (example: SELECT * FROM data.simple_bus_routes LIMIT 100;)
-- Wrap column names in double quotes like "Column Name".
-- Do NOT add a WHERE clause unless the user asks to filter by a specific value.
-- Always end with LIMIT 100.
-
-${schemaText}`;
-            sql = await generateSqlWithAi(systemPrompt, question);
-          } catch (llmErr) {
-            console.warn("External LLM failed, falling back to Built-In Smart SQL Translator:", llmErr);
-            aiStatusText.textContent = "WebGPU/LLM unavailable; using Built-in Smart SQL Translator...";
-            sql = await translateQuestionToSql(question);
-          }
+        if (!apiKey) {
+          // Fallback to built-in translator if no Groq API key is entered yet
+          const sql = await translateQuestionToSql(question);
+          sqlQueryBox.value = sql;
+          aiStatusText.textContent = `Built-in Translator (add Groq key above for full AI): ${sql}`;
+          await executeQuery(sql, `Search: "${question}"`);
+          return;
         }
 
+        let { sql, usedModel } = await generateSqlWithGroq(apiKey, question);
         sqlQueryBox.value = sql;
-        aiStatusText.textContent = `Running: ${sql}`;
+        aiStatusText.textContent = `Generated by ${usedModel}: ${sql}`;
 
         try {
           await executeQuery(sql, `AI Search: "${question}"`);
-          aiStatusText.textContent = `Completed (${sql})`;
         } catch (dbErr) {
-          // Fallback to Built-In translator if external LLM produced invalid SQL
-          console.warn("Generated SQL failed, falling back to Built-In translator:", dbErr);
-          sql = await translateQuestionToSql(question);
+          // 1-step self-correction with DuckDB error feedback
+          aiStatusText.textContent = "Refining SQL after DuckDB feedback...";
+          const retry = await generateSqlWithGroq(apiKey, question, dbErr.message || String(dbErr));
+          sql = retry.sql;
           sqlQueryBox.value = sql;
+          aiStatusText.textContent = `Generated by ${retry.usedModel}: ${sql}`;
           await executeQuery(sql, `AI Search: "${question}"`);
-          aiStatusText.textContent = `Completed (${sql})`;
         }
       } catch (err) {
-        showError(`AI query failed: ${err.message || err}`);
+        showError(`Query failed: ${err.message || err}`);
       } finally {
         askAiBtn.disabled = false;
       }
