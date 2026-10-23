@@ -491,7 +491,7 @@
         <div class="form-group">
           <label for="builderColumn">Filter Column</label>
           <select id="builderColumn">
-            <option value="">(No filter, show all)</option>
+            <option value="">(No column filter)</option>
           </select>
         </div>
         <div class="form-group">
@@ -525,7 +525,7 @@
           </select>
         </div>
         <div class="form-group">
-          <label for="builderLimit">Max Rows</label>
+          <label for="builderLimit">Preview Row Limit</label>
           <select id="builderLimit">
             <option value="50">50 rows</option>
             <option value="100" selected>100 rows</option>
@@ -610,14 +610,15 @@
           <input
             type="text"
             id="quickSearchInput"
-            placeholder="Quick filter displayed rows..."
+            placeholder="Quick filter loaded rows..."
             style="width: 220px; padding: 0.45rem 0.65rem; font-size: 0.85rem;"
           />
-          <button id="exportCsvBtn" class="btn btn-success" disabled>Download CSV (Excel)</button>
+          <button id="exportCsvBtn" class="btn btn-success" disabled>Download loaded rows (CSV)</button>
         </div>
       </div>
 
       <div id="resultsFreshness" class="panel-subtitle" role="status" aria-live="polite"></div>
+      <div id="resultsScope" class="panel-subtitle" role="status" aria-live="polite"></div>
 
       <details class="sql-details">
         <summary>View or Edit SQL Query</summary>
@@ -733,6 +734,7 @@
         tag: "Customer Service",
         desc: "View up to 100 vehicle positions, newest observation first.",
         sql: 'SELECT * FROM data.gtfsrt_vehicle_positions_v1 ORDER BY NULLIF("timestamp", 0) DESC NULLS LAST LIMIT 100;',
+        rowLimit: 100,
         sourceTime: { column: "timestamp", format: "unix-seconds" }
       },
       {
@@ -740,6 +742,7 @@
         tag: "Operations / Paratransit",
         desc: "Check up to 100 Clever vehicle locations, newest timestamp first.",
         sql: 'SELECT * FROM data.clever_vehicle_locations_v1 ORDER BY TRY_CAST("timestamp" AS TIMESTAMPTZ) DESC NULLS LAST LIMIT 100;',
+        rowLimit: 100,
         sourceTime: { column: "timestamp", format: "iso" }
       },
       {
@@ -747,6 +750,7 @@
         tag: "Customer Service",
         desc: "Show the newest prediction batches first, then the earliest predicted times.",
         sql: `SELECT * FROM data.clever_predictions_v1 ORDER BY try_strptime("tmstmp", '%Y%m%d %H:%M') DESC NULLS LAST, try_strptime("prdtm", '%Y%m%d %H:%M') ASC NULLS LAST LIMIT 100;`,
+        rowLimit: 100,
         sourceTime: { column: "tmstmp", format: "clever-local" }
       },
       {
@@ -754,31 +758,36 @@
         tag: "Customer Service",
         desc: "Inspect published trip updates. This dataset does not include an observation timestamp.",
         sql: "SELECT * FROM data.gtfsrt_trip_updates_v1 LIMIT 100;",
+        rowLimit: 100,
         sourceTime: { unavailable: "Source observation time unavailable: this dataset has no observation timestamp. Predicted arrival and departure times do not establish freshness." }
       },
       {
-        title: "All CARTA Bus Routes",
+        title: "CARTA Bus Routes (Preview)",
         tag: "Reference",
-        desc: "Complete directory of CARTA bus routes.",
-        sql: "SELECT * FROM data.simple_bus_routes LIMIT 200;"
+        desc: "Preview CARTA bus routes and route names.",
+        sql: "SELECT * FROM data.simple_bus_routes LIMIT 200;",
+        rowLimit: 200
       },
       {
-        title: "All CARTA Bus Stops",
+        title: "CARTA Bus Stops (Preview)",
         tag: "Customer Service",
         desc: "Browse bus stops to look up stop IDs and names for riders.",
-        sql: "SELECT * FROM data.simple_bus_stops LIMIT 250;"
+        sql: "SELECT * FROM data.simple_bus_stops LIMIT 250;",
+        rowLimit: 250
       },
       {
         title: "CARTA Monthly Ridership (NTD)",
         tag: "Management",
         desc: "View CARTA monthly ridership figures reported to the NTD.",
-        sql: `SELECT * FROM data.ntd_monthly_ridership_v1 WHERE "NTD ID" = '${CARTA_NTD_ID}' ORDER BY "Date" DESC LIMIT 200;`
+        sql: `SELECT * FROM data.ntd_monthly_ridership_v1 WHERE "NTD ID" = '${CARTA_NTD_ID}' ORDER BY "Date" DESC LIMIT 200;`,
+        rowLimit: 200
       },
       {
         title: "Bike Chattanooga Stations",
         tag: "Mobility",
-        desc: "All Bike Chattanooga stations and dock capacities.",
-        sql: "SELECT * FROM data.bike_chattanooga_stations_v1 LIMIT 100;"
+        desc: "Preview Bike Chattanooga stations and dock capacities.",
+        sql: "SELECT * FROM data.bike_chattanooga_stations_v1 LIMIT 100;",
+        rowLimit: 100
       }
     ];
 
@@ -789,6 +798,7 @@
     const schemaCache = {}; // viewName -> [{ name, type }]
     let currentRows = [];
     let currentColumns = [];
+    let currentReport = null;
 
     // DOM elements
     const dbStatusDot = document.getElementById("dbStatusDot");
@@ -806,6 +816,7 @@
     const runCustomSqlBtn = document.getElementById("runCustomSqlBtn");
     const resultsMeta = document.getElementById("resultsMeta");
     const resultsFreshness = document.getElementById("resultsFreshness");
+    const resultsScope = document.getElementById("resultsScope");
     const errorBanner = document.getElementById("errorBanner");
     const tableContainer = document.getElementById("tableContainer");
     const exportCsvBtn = document.getElementById("exportCsvBtn");
@@ -861,11 +872,12 @@
           <div>
             <div class="preset-card-title">${escapeHtml(report.title)}</div>
             <div class="preset-card-desc">${escapeHtml(report.desc)}</div>
+            <div class="preset-card-desc">Preview: up to ${report.rowLimit.toLocaleString()} rows</div>
           </div>
           <span class="preset-card-tag">${escapeHtml(report.tag)}</span>
         `;
         btn.addEventListener("click", () => {
-          executeQuery(report.sql, report.title, report.sourceTime);
+          executeQuery(report.sql, report.title, report.sourceTime, report.rowLimit);
         });
         presetGrid.appendChild(btn);
       });
@@ -953,7 +965,7 @@
       builderSortCol.innerHTML = `<option value="">Loading columns...</option>`;
       try {
         const cols = await getColumnsForView(viewName);
-        builderColumn.innerHTML = `<option value="">(No filter, show all)</option>`;
+        builderColumn.innerHTML = `<option value="">(No column filter)</option>`;
         builderSortCol.innerHTML = `<option value="">(Default order)</option>`;
         cols.forEach((c) => {
           const opt1 = document.createElement("option");
@@ -1011,7 +1023,7 @@
       sql += ` LIMIT ${limit};`;
 
       const label = DATASET_INFO[view]?.label || view;
-      executeQuery(sql, label);
+      executeQuery(sql, label, null, limit);
     });
 
     runCustomSqlBtn.addEventListener("click", () => {
@@ -1022,12 +1034,14 @@
     });
 
     // Execute a SQL query and render table
-    async function executeQuery(sql, title = "Query Results", sourceTime = null) {
+    async function executeQuery(sql, title = "Query Results", sourceTime = null, rowLimit = null) {
       if (!conn) return;
       hideError();
       sqlQueryBox.value = sql;
       resultsMeta.textContent = `Running: ${title}...`;
       resultsFreshness.textContent = "Checking source timestamps...";
+      resultsScope.textContent = "";
+      currentReport = null;
       tableContainer.innerHTML = `<div class="empty-state">Loading data from CARTA S3...</div>`;
       exportCsvBtn.disabled = true;
 
@@ -1045,17 +1059,27 @@
           return obj;
         });
 
-        resultsMeta.textContent = `${title}: ${currentRows.length.toLocaleString()} rows (${elapsedMs} ms)`;
+        currentReport = { title, elapsedMs };
+        resultsScope.textContent = describeResultScope(rowLimit);
         resultsFreshness.textContent = `${describeSourceFreshness(currentRows, sourceTime)} Report retrieved: ${reportTimeFormatter.format(new Date())} (${REPORT_TIME_ZONE}).`;
         exportCsvBtn.disabled = currentRows.length === 0;
-        renderTable(currentRows);
+        exportCsvBtn.textContent = `Download all ${currentRows.length.toLocaleString()} loaded rows (CSV)`;
+        applyQuickFilter();
       } catch (err) {
         resultsMeta.textContent = `${title}: Error`;
         resultsFreshness.textContent = "Source freshness unavailable because the query failed.";
+        resultsScope.textContent = "No results available for this query.";
         tableContainer.innerHTML = `<div class="empty-state">Query could not be completed.</div>`;
         showError(err.message || String(err));
         throw err;
       }
+    }
+
+    function describeResultScope(rowLimit) {
+      const scope = Number.isInteger(rowLimit) && rowLimit > 0
+        ? `Limited preview: up to ${rowLimit.toLocaleString()} rows. Additional matching records may exist.`
+        : "Query results only; completeness against the full dataset has not been verified.";
+      return `${scope} The quick filter searches loaded rows only. CSV downloads include all loaded rows, including any hidden by the quick filter.`;
     }
 
     function parseSourceTime(value, format) {
@@ -1137,17 +1161,20 @@
     }
 
     // Quick client-side row search
-    quickSearchInput.addEventListener("input", () => {
+    function applyQuickFilter() {
       const term = quickSearchInput.value.trim().toLowerCase();
-      if (!term) {
-        renderTable(currentRows);
-        return;
+      const filtered = term
+        ? currentRows.filter((row) =>
+            currentColumns.some((col) => String(row[col]).toLowerCase().includes(term))
+          )
+        : currentRows;
+      if (currentReport) {
+        resultsMeta.textContent = `${currentReport.title}: ${filtered.length.toLocaleString()} displayed / ${currentRows.length.toLocaleString()} loaded rows (${currentReport.elapsedMs} ms)`;
       }
-      const filtered = currentRows.filter((row) =>
-        currentColumns.some((col) => String(row[col]).toLowerCase().includes(term))
-      );
       renderTable(filtered);
-    });
+    }
+
+    quickSearchInput.addEventListener("input", applyQuickFilter);
 
     // Export current results to CSV
     exportCsvBtn.addEventListener("click", () => {
