@@ -554,7 +554,6 @@
           <select id="groqModelSelect">
             <option value="openai/gpt-oss-120b" selected>OpenAI GPT-OSS 120B (Default, Most Accurate)</option>
             <option value="openai/gpt-oss-20b">OpenAI GPT-OSS 20B (Fastest)</option>
-            <option value="qwen/qwen3.8-27b">Qwen 3.8 27B (Backup)</option>
           </select>
         </div>
         <div style="display: flex; align-items: flex-end; gap: 0.75rem; flex-wrap: wrap;">
@@ -641,6 +640,7 @@
 
     // URL to attach data.duckdb from GitHub Raw (avoids the S3 .wal 403 error)
     const REMOTE_DUCKDB_URL = "https://raw.githubusercontent.com/gocarta/data.duckdb/main/data.duckdb";
+    const GROQ_MODELS = Object.freeze(["openai/gpt-oss-120b", "openai/gpt-oss-20b"]);
 
     // Friendly descriptions for CARTA datasets
     const DATASET_INFO = {
@@ -1337,24 +1337,6 @@
       return res;
     }
 
-    async function discoverAvailableGroqModel(apiKey) {
-      const res = await fetch("https://api.groq.com/openai/v1/models", {
-        headers: { "Authorization": `Bearer ${apiKey}` }
-      });
-      if (!res.ok) return null;
-      const data = await res.json();
-      const models = (data.data || []).map((m) => m.id);
-      const preferredOrder = [
-        "openai/gpt-oss-120b",
-        "openai/gpt-oss-20b",
-        "qwen/qwen3.8-27b"
-      ];
-      for (const p of preferredOrder) {
-        if (models.includes(p)) return p;
-      }
-      return models.find((id) => !/whisper|orpheus|guard|safeguard|tts|embed/i.test(id)) || null;
-    }
-
     async function generateSqlWithGroq(apiKey, question, retryError = "") {
       const schemaText = await buildGroqSchemaPrompt(question);
       const systemPrompt = `You are a DuckDB SQL expert for Chattanooga Area Regional Transportation Authority (CARTA).
@@ -1375,14 +1357,10 @@ ${schemaText}`;
         ? `Question: ${question}\nPrevious SQL failed in DuckDB with error: ${retryError}\nFix the DuckDB SQL query using only the exact column names listed in Schema.`
         : question;
 
-      const selectedModel = groqModelSelect.value || "openai/gpt-oss-120b";
-      const candidates = [
-        selectedModel,
-        "openai/gpt-oss-120b",
-        "openai/gpt-oss-20b",
-        "qwen/qwen3.8-27b"
-      ];
-      const uniqueCandidates = [...new Set(candidates)];
+      const selectedModel = GROQ_MODELS.includes(groqModelSelect.value)
+        ? groqModelSelect.value
+        : GROQ_MODELS[0];
+      const uniqueCandidates = [...new Set([selectedModel, ...GROQ_MODELS])];
 
       let lastRes = null;
       let usedModel = uniqueCandidates[0];
@@ -1402,20 +1380,6 @@ ${schemaText}`;
         }
         if (res.status !== 404 && res.status !== 429 && res.status !== 400) {
           break;
-        }
-      }
-
-      // Dynamic fallback via /openai/v1/models if default candidates were not found
-      const discovered = await discoverAvailableGroqModel(apiKey);
-      if (discovered && !uniqueCandidates.includes(discovered)) {
-        usedModel = discovered;
-        aiStatusText.textContent = `Generating SQL with Groq (${usedModel})...`;
-        const res = await callGroqChat(apiKey, usedModel, systemPrompt, userPrompt);
-        lastRes = res;
-        if (res.ok) {
-          const data = await res.json();
-          const sql = extractSql(data.choices?.[0]?.message?.content || "");
-          return { sql, usedModel };
         }
       }
 
