@@ -575,6 +575,11 @@
           <button id="saveGroqKeyBtn" class="btn btn-secondary">Save Key</button>
           <span id="groqKeyStatus" style="font-size: 0.85rem; color: var(--muted); padding-bottom: 0.4rem;"></span>
         </div>
+        <div style="margin-top: 0.5rem; font-size: 0.8rem; color: var(--muted); line-height: 1.4;">
+          <strong>Public &amp; Partner Notice:</strong> Anyone can use this AI tool by getting a free API key at
+          <a href="https://console.groq.com/keys" target="_blank" rel="noopener" style="color: var(--carta-blue);">console.groq.com/keys</a>.
+          Your key is saved strictly in your local browser, and CARTA does not collect or log your key or searches.
+        </div>
       </div>
 
       <div class="chip-row">
@@ -1185,126 +1190,6 @@
       return bestView;
     }
 
-    function findMatchingColumn(cols, phrase) {
-      if (!phrase) return null;
-      const target = phrase.toLowerCase().replace(/[^a-z0-9]/g, "");
-      if (!target) return null;
-
-      // 1. Exact normalized match
-      for (const c of cols) {
-        const norm = c.name.toLowerCase().replace(/[^a-z0-9]/g, "");
-        if (norm === target) return c.name;
-      }
-      // 2. Column contains phrase or phrase contains column
-      let bestCol = null;
-      let bestScore = 0;
-      const tokens = phrase.toLowerCase().split(/\W+/).filter((t) => t.length >= 3);
-      for (const c of cols) {
-        const cLower = c.name.toLowerCase();
-        const cWords = cLower.split(/[^a-z0-9]+/).filter(Boolean);
-        let score = 0;
-        if (cLower.includes(target)) score += 6;
-        for (const t of tokens) {
-          if (cWords.includes(t)) score += 5;
-          else if (cLower.includes(t)) score += 3;
-        }
-        if (score > bestScore) {
-          bestScore = score;
-          bestCol = c.name;
-        }
-      }
-      return bestScore > 0 ? bestCol : null;
-    }
-
-    function translateNtdFilterTerm(rawVal) {
-      const norm = rawVal.trim().toLowerCase();
-      if (norm === "hamilton county" || norm === "hamilton" || norm === "carta") {
-        return "Chattanooga";
-      }
-      return rawVal.trim();
-    }
-
-    async function translateQuestionToSql(question) {
-      const viewName = matchBestView(question);
-      aiStatusText.textContent = `Inspecting schema for ${viewName}...`;
-      const cols = await getColumnsForView(viewName);
-      const qLower = question.toLowerCase();
-
-      // Remove trailing "from <table_name>" so it doesn't interfere with filter/sort matching
-      const cleanQ = question.replace(/\s+from\s+(?:data\.)?[a-zA-Z0-9_]+/gi, "").trim();
-
-      // 1. Check if user is asking for a row count
-      if (/\b(how many|count of|total number of)\b/i.test(cleanQ)) {
-        return `SELECT COUNT(*) AS total_records FROM data.${viewName};`;
-      }
-
-      // 2. Extract row limit (ignore numbers attached to v1 or 911)
-      const qWithoutView = cleanQ.replace(new RegExp(viewName, "gi"), "").replace(/\b911\b/g, "");
-      const limitMatch =
-        qWithoutView.match(/\b(?:top|first|show|limit|last|recent)\s+(\d{1,4})\b/i) ||
-        qWithoutView.match(/\b(\d{1,4})\s+(?:rows|records|stations|routes|stops|locations|vehicles|trips)\b/i);
-      const limit = limitMatch ? Math.min(Math.max(parseInt(limitMatch[1], 10), 1), 1000) : 100;
-
-      // 3. Check for filter criteria
-      let whereClause = "";
-      // Pattern A: "with <VAL> in the <COL>" (e.g., "with Market in the name")
-      const withInMatch = cleanQ.match(/\bwith\s+['"]?([a-zA-Z0-9_\-\s]+?)['"]?\s+in\s+(?:the\s+)?([a-zA-Z0-9_]+)\b/i);
-      // Pattern B: "where <COL> is/equals/contains <VAL>"
-      const whereMatch = cleanQ.match(/\bwhere\s+([a-zA-Z0-9_\s]+?)\s+(?:is|equals|=|contains|like)\s+['"]?([a-zA-Z0-9_\-\s]+?)['"]?(?:\s+(?:ordered|order|sorted|sort|by|limit)\b|$)/i);
-      // Pattern C: "containing '<VAL>'" or "named '<VAL>'"
-      const namedMatch = cleanQ.match(/\b(?:named|containing|called)\s+['"]?([a-zA-Z0-9_\-\s]+?)['"]?(?:\s+(?:ordered|order|sorted|sort|by|limit)\b|$)/i);
-      // Pattern D: "for <VAL>" or "on <VAL>" (e.g., "for Hamilton County", "for Chattanooga", "on Market")
-      const forMatch = cleanQ.match(/\b(?:for|on)\s+['"]?([a-zA-Z0-9_\-\s]+?)['"]?(?:\s+(?:ordered|order|sorted|sort|by|limit)\b|$)/i);
-
-      if (withInMatch) {
-        const val = withInMatch[1].trim().replace(/'/g, "''");
-        const col = findMatchingColumn(cols, withInMatch[2]) || cols.find((c) => /name|title|desc|id/i.test(c.name))?.name;
-        if (col && val) {
-          whereClause = ` WHERE CAST("${col}" AS VARCHAR) ILIKE '%${val}%'`;
-        }
-      } else if (whereMatch) {
-        const col = findMatchingColumn(cols, whereMatch[1]);
-        const val = whereMatch[2].trim().replace(/'/g, "''");
-        if (col && val) {
-          whereClause = ` WHERE CAST("${col}" AS VARCHAR) ILIKE '%${val}%'`;
-        }
-      } else if (namedMatch || forMatch) {
-        const rawVal = (namedMatch ? namedMatch[1] : forMatch[1]).trim();
-        if (viewName === "ntd_monthly_ridership_v1") {
-          const ntdVal = translateNtdFilterTerm(rawVal).replace(/'/g, "''");
-          whereClause = ` WHERE ("Agency" ILIKE '%${ntdVal}%' OR "UZA Name" ILIKE '%${ntdVal}%')`;
-        } else {
-          const val = rawVal.replace(/'/g, "''");
-          const col = cols.find((c) => /name|title|agency|route|stop|address|street/i.test(c.name))?.name || cols[0]?.name;
-          if (col && val) {
-            whereClause = ` WHERE CAST("${col}" AS VARCHAR) ILIKE '%${val}%'`;
-          }
-        }
-      } else if (viewName === "ntd_monthly_ridership_v1" && /\b(chattanooga|hamilton|carta)\b/i.test(cleanQ)) {
-        whereClause = ` WHERE ("Agency" ILIKE '%Chattanooga%' OR "UZA Name" ILIKE '%Chattanooga%')`;
-      }
-
-      // 4. Check for ORDER BY criteria
-      let orderClause = "";
-      const orderMatch = cleanQ.match(/\b(?:ordered\s+by|order\s+by|sorted\s+by|sort\s+by|by)\s+([a-zA-Z0-9_\s]+?)(?:\s+(asc|desc|ascending|descending))?$/i);
-      if (orderMatch) {
-        const col = findMatchingColumn(cols, orderMatch[1]);
-        if (col) {
-          const explicitAsc = /\b(asc|ascending|lowest|smallest|oldest|least)\b/i.test(cleanQ);
-          const explicitDesc = /\b(desc|descending|top|highest|most|largest|biggest|recent|latest|newest)\b/i.test(cleanQ);
-          const dir = explicitAsc ? "ASC" : explicitDesc ? "DESC" : "DESC";
-          orderClause = ` ORDER BY "${col}" ${dir}`;
-        }
-      } else if (/\b(recent|latest|newest)\b/i.test(qLower) || viewName === "ntd_monthly_ridership_v1") {
-        const timeCol = cols.find((c) => /time|date|timestamp|updated|created|year/i.test(c.name))?.name;
-        if (timeCol) {
-          orderClause = ` ORDER BY "${timeCol}" DESC`;
-        }
-      }
-
-      return `SELECT * FROM data.${viewName}${whereClause}${orderClause} LIMIT ${limit};`;
-    }
-
     const sampleCache = {}; // viewName -> string summary of 1 sample row
 
     async function getSampleRowForView(viewName) {
@@ -1559,13 +1444,7 @@ ${schemaText}`;
         }
 
         if (!apiKey) {
-          // Fallback to built-in translator if no Groq API key is entered yet
-          const sql = await translateQuestionToSql(question);
-          validateCartaSql(sql);
-          sqlQueryBox.value = sql;
-          aiStatusText.textContent = `Built-in Translator (add Groq key above for full AI): ${sql}`;
-          await executeQuery(sql, `Search: "${question}"`);
-          return;
+          throw new Error("Please enter a free Groq API key above to use the AI search. Anyone can get a free key in 30 seconds at console.groq.com/keys.");
         }
 
         let { sql, usedModel } = await generateSqlWithGroq(apiKey, question);
