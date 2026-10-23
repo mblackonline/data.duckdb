@@ -610,6 +610,7 @@
           <input
             type="text"
             id="quickSearchInput"
+            disabled
             placeholder="Quick filter loaded rows..."
             style="width: 220px; padding: 0.45rem 0.65rem; font-size: 0.85rem;"
           />
@@ -799,6 +800,8 @@
     let currentRows = [];
     let currentColumns = [];
     let currentReport = null;
+    let reportRequestId = 0;
+    let activeAiRequestId = null;
 
     // DOM elements
     const dbStatusDot = document.getElementById("dbStatusDot");
@@ -1034,43 +1037,77 @@
     });
 
     // Execute a SQL query and render table
-    async function executeQuery(sql, title = "Query Results", sourceTime = null, rowLimit = null) {
+    function clearResults() {
+      currentRows = [];
+      currentColumns = [];
+      currentReport = null;
+      quickSearchInput.disabled = true;
+      exportCsvBtn.disabled = true;
+      exportCsvBtn.textContent = "Download loaded rows (CSV)";
+    }
+
+    function beginReportRequest(title, message = "Loading data from CARTA S3...") {
+      const requestId = ++reportRequestId;
+      clearResults();
+      hideError();
+      sqlQueryBox.value = "";
+      aiStatusText.textContent = "";
+      resultsMeta.textContent = `Running: ${title}...`;
+      resultsFreshness.textContent = "Waiting for query results...";
+      resultsScope.textContent = "";
+      tableContainer.innerHTML = `<div class="empty-state">${escapeHtml(message)}</div>`;
+      return requestId;
+    }
+
+    function showReportError(title, err) {
+      clearResults();
+      resultsMeta.textContent = `${title}: Error`;
+      resultsFreshness.textContent = "Source freshness unavailable because the report did not complete.";
+      resultsScope.textContent = "No results available for this query.";
+      tableContainer.innerHTML = `<div class="empty-state">Query could not be completed.</div>`;
+      showError(err.message || String(err));
+    }
+
+    async function executeQuery(sql, title = "Query Results", sourceTime = null, rowLimit = null, requestId = null) {
       if (!conn) return;
+      if (requestId === null) requestId = beginReportRequest(title);
+      if (requestId !== reportRequestId) return;
+      clearResults();
       hideError();
       sqlQueryBox.value = sql;
       resultsMeta.textContent = `Running: ${title}...`;
       resultsFreshness.textContent = "Checking source timestamps...";
       resultsScope.textContent = "";
-      currentReport = null;
       tableContainer.innerHTML = `<div class="empty-state">Loading data from CARTA S3...</div>`;
       exportCsvBtn.disabled = true;
 
       const t0 = performance.now();
       try {
         const result = await conn.query(sql);
+        if (requestId !== reportRequestId) return;
         const elapsedMs = Math.round(performance.now() - t0);
 
-        currentColumns = result.schema.fields.map((f) => f.name);
-        currentRows = result.toArray().map((row) => {
+        const columns = result.schema.fields.map((f) => f.name);
+        const rows = result.toArray().map((row) => {
           const obj = {};
-          for (const col of currentColumns) {
+          for (const col of columns) {
             obj[col] = formatCellValue(row[col]);
           }
           return obj;
         });
 
+        currentColumns = columns;
+        currentRows = rows;
         currentReport = { title, elapsedMs };
         resultsScope.textContent = describeResultScope(rowLimit);
         resultsFreshness.textContent = `${describeSourceFreshness(currentRows, sourceTime)} Report retrieved: ${reportTimeFormatter.format(new Date())} (${REPORT_TIME_ZONE}).`;
         exportCsvBtn.disabled = currentRows.length === 0;
         exportCsvBtn.textContent = `Download all ${currentRows.length.toLocaleString()} loaded rows (CSV)`;
+        quickSearchInput.disabled = currentRows.length === 0;
         applyQuickFilter();
       } catch (err) {
-        resultsMeta.textContent = `${title}: Error`;
-        resultsFreshness.textContent = "Source freshness unavailable because the query failed.";
-        resultsScope.textContent = "No results available for this query.";
-        tableContainer.innerHTML = `<div class="empty-state">Query could not be completed.</div>`;
-        showError(err.message || String(err));
+        if (requestId !== reportRequestId) return;
+        showReportError(title, err);
         throw err;
       }
     }
@@ -1162,6 +1199,7 @@
 
     // Quick client-side row search
     function applyQuickFilter() {
+      if (!currentReport) return;
       const term = quickSearchInput.value.trim().toLowerCase();
       const filtered = term
         ? currentRows.filter((row) =>
@@ -1178,7 +1216,7 @@
 
     // Export current results to CSV
     exportCsvBtn.addEventListener("click", () => {
-      if (!currentRows.length) return;
+      if (!currentReport || exportCsvBtn.disabled || !currentRows.length) return;
       const csvLines = [
         currentColumns.map(csvEscape).join(","),
         ...currentRows.map((row) => currentColumns.map((col) => csvEscape(row[col])).join(","))
@@ -1425,8 +1463,10 @@
       return res;
     }
 
-    async function generateSqlWithGroq(apiKey, question, retryError = "") {
+    async function generateSqlWithGroq(apiKey, question, retryError = "", requestId = null) {
+      const isCurrent = () => requestId === null || requestId === reportRequestId;
       const schemaText = await buildGroqSchemaPrompt(question);
+      if (!isCurrent()) return null;
       const systemPrompt = `You are a DuckDB SQL expert for Chattanooga Area Regional Transportation Authority (CARTA).
 Write a single valid DuckDB SQL query to answer the user's question. Output ONLY the SQL query, with no explanation or markdown.
 Rules:
@@ -1455,15 +1495,18 @@ ${schemaText}`;
       let usedModel = uniqueCandidates[0];
 
       for (const candidate of uniqueCandidates) {
+        if (!isCurrent()) return null;
         usedModel = candidate;
         aiStatusText.textContent = `Generating SQL with Groq (${usedModel})...`;
         const res = await callGroqChat(apiKey, usedModel, systemPrompt, userPrompt);
+        if (!isCurrent()) return null;
         lastRes = res;
         if (res.ok) {
           if (usedModel !== selectedModel) {
             groqModelSelect.value = usedModel;
           }
           const data = await res.json();
+          if (!isCurrent()) return null;
           const sql = extractSql(data.choices?.[0]?.message?.content || "");
           return { sql, usedModel };
         }
@@ -1487,7 +1530,9 @@ ${schemaText}`;
       }
 
       askAiBtn.disabled = true;
-      hideError();
+      const title = `AI Search: "${question}"`;
+      const requestId = beginReportRequest(title, "Generating SQL with Groq...");
+      activeAiRequestId = requestId;
       try {
         if (isOffTopicQuestion(question)) {
           aiStatusText.textContent = "Blocked off-topic request (0 API tokens used).";
@@ -1500,27 +1545,35 @@ ${schemaText}`;
           throw new Error("Please enter a free Groq API key above to use the AI search. Anyone can get a free key in 30 seconds at console.groq.com/keys.");
         }
 
-        let { sql, usedModel } = await generateSqlWithGroq(apiKey, question);
+        const generated = await generateSqlWithGroq(apiKey, question, "", requestId);
+        if (requestId !== reportRequestId) return;
+        let { sql, usedModel } = generated;
         validateCartaSql(sql);
         sqlQueryBox.value = sql;
         aiStatusText.textContent = `Generated by ${usedModel}: ${sql}`;
 
         try {
-          await executeQuery(sql, `AI Search: "${question}"`);
+          await executeQuery(sql, title, null, null, requestId);
         } catch (dbErr) {
+          if (requestId !== reportRequestId) return;
           // 1-step self-correction with DuckDB error feedback
           aiStatusText.textContent = "Refining SQL after DuckDB feedback...";
-          const retry = await generateSqlWithGroq(apiKey, question, dbErr.message || String(dbErr));
+          const retry = await generateSqlWithGroq(apiKey, question, dbErr.message || String(dbErr), requestId);
+          if (requestId !== reportRequestId) return;
           validateCartaSql(retry.sql);
           sql = retry.sql;
           sqlQueryBox.value = sql;
           aiStatusText.textContent = `Generated by ${retry.usedModel}: ${sql}`;
-          await executeQuery(sql, `AI Search: "${question}"`);
+          await executeQuery(sql, title, null, null, requestId);
         }
       } catch (err) {
-        showError(err.message || String(err));
+        if (requestId !== reportRequestId) return;
+        showReportError(title, err);
       } finally {
-        askAiBtn.disabled = false;
+        if (activeAiRequestId === requestId) {
+          activeAiRequestId = null;
+          askAiBtn.disabled = false;
+        }
       }
     });
 
