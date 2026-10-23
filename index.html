@@ -615,6 +615,8 @@
             style="width: 220px; padding: 0.45rem 0.65rem; font-size: 0.85rem;"
           />
           <button id="exportCsvBtn" class="btn btn-success" disabled>Download loaded rows (CSV)</button>
+          <button id="stopReportBtn" class="btn btn-secondary" disabled>Stop report</button>
+          <button id="reconnectBtn" class="btn" hidden>Reconnect</button>
         </div>
       </div>
 
@@ -654,6 +656,12 @@
       year: "numeric", month: "short", day: "numeric",
       hour: "numeric", minute: "2-digit", second: "2-digit", timeZoneName: "short"
     });
+    const MAX_RESULT_ROWS = 5000;
+    const MAX_RESULT_BYTES = 5 * 1024 * 1024;
+    const MAX_RESULT_CELLS = 50000;
+    const MAX_RESULT_COLUMNS = 100;
+    const MAX_CELL_CHARACTERS = 100000;
+    const REPORT_TIMEOUT_MS = 30000;
 
     // Friendly descriptions for CARTA datasets
     const DATASET_INFO = {
@@ -803,6 +811,9 @@
     let currentReport = null;
     let reportRequestId = 0;
     let activeAiRequestId = null;
+    let duckdbWorker = null;
+    let currentRequestTitle = "Report";
+    const activeQueries = new Set();
 
     // DOM elements
     const dbStatusDot = document.getElementById("dbStatusDot");
@@ -825,6 +836,8 @@
     const tableContainer = document.getElementById("tableContainer");
     const exportCsvBtn = document.getElementById("exportCsvBtn");
     const quickSearchInput = document.getElementById("quickSearchInput");
+    const stopReportBtn = document.getElementById("stopReportBtn");
+    const reconnectBtn = document.getElementById("reconnectBtn");
 
     // Plain-English Search DOM elements
     const groqApiKeyInput = document.getElementById("groqApiKeyInput");
@@ -898,6 +911,10 @@
           new Blob([`importScripts("${bundle.mainWorker}");`], { type: "text/javascript" })
         );
         const worker = new Worker(workerUrl);
+        duckdbWorker = worker;
+        worker.addEventListener("error", () => {
+          if (duckdbWorker === worker) stopReports("The database worker stopped unexpectedly. Reconnect to try again.");
+        });
         const logger = new duckdb.ConsoleLogger();
         db = new duckdb.AsyncDuckDB(logger, worker);
         await db.instantiate(bundle.mainModule, bundle.pthreadWorker);
@@ -905,13 +922,17 @@
 
         await db.open({
           path: ":memory:",
+          maximumThreads: 1,
           query: {
+            queryPollingInterval: 10,
             castBigIntToDouble: true,
             castDecimalToDouble: true,
             castTimestampToDate: true
           }
         });
         conn = await db.connect();
+        // A buffer-manager limit supplements streaming and the independent worker watchdog.
+        await conn.query("SET memory_limit = '256MB';");
 
         await conn.query(`ATTACH '${REMOTE_DUCKDB_URL}' AS data (READ_ONLY);`);
 
@@ -1039,6 +1060,124 @@
     });
 
     // Execute a SQL query and render table
+    function reportLimitError(message) {
+      const error = new Error(message);
+      error.code = "REPORT_LIMIT";
+      return error;
+    }
+
+    function stopReports(message = "Report stopped. Reconnect to run another report.") {
+      ++reportRequestId;
+      activeAiRequestId = null;
+      const worker = duckdbWorker;
+      const bindings = db;
+      duckdbWorker = null;
+      conn = null;
+      db = null;
+      if (worker) worker.terminate();
+      if (bindings) {
+        try { bindings.detach(); } catch { /* The reconnect action must remain available after a worker failure. */ }
+      }
+      const error = reportLimitError(message);
+      for (const operation of activeQueries) {
+        clearTimeout(operation.timer);
+        operation.reject(error);
+      }
+      showReportError(currentRequestTitle, error);
+      stopReportBtn.disabled = true;
+      reconnectBtn.hidden = false;
+      runBuilderBtn.disabled = true;
+      runCustomSqlBtn.disabled = true;
+      askAiBtn.disabled = true;
+      for (const button of presetGrid.querySelectorAll("button")) button.disabled = true;
+      dbStatusDot.classList.remove("ready");
+      dbStatusDot.classList.add("error");
+      dbStatusText.textContent = "Stopped. Reconnect to run another report.";
+    }
+
+    stopReportBtn.addEventListener("click", () => stopReports());
+    reconnectBtn.addEventListener("click", () => globalThis.location.reload());
+
+    async function collectReportRows(reader, requestId) {
+      await reader.open();
+      if (requestId !== reportRequestId) return null;
+      const columns = reader.schema.fields.map((field) => field.name);
+      if (columns.length > MAX_RESULT_COLUMNS) throw reportLimitError("This report has too many columns. Select fewer columns and try again.");
+      const encoder = new TextEncoder();
+      let bytes = columns.reduce((size, column) => size + encoder.encode(column).byteLength, 0);
+      const rows = [];
+      const partial = (reason) => {
+        if (!rows.length) throw reportLimitError("A result row is too large to display safely. Select fewer columns or narrow the report.");
+        return { columns, rows, truncated: true, reason };
+      };
+      for await (const batch of reader) {
+        if (requestId !== reportRequestId) return null;
+        for (let index = 0; index < batch.numRows; index++) {
+          if (rows.length >= MAX_RESULT_ROWS) return partial("row limit");
+          if ((rows.length + 1) * columns.length > MAX_RESULT_CELLS) return partial("output size");
+          const sourceRow = batch.get(index);
+          const row = {};
+          let rowBytes = 0;
+          for (const column of columns) {
+            const value = sourceRow[column];
+            if ((typeof value === "string" && value.length > MAX_CELL_CHARACTERS) ||
+                (value && typeof value === "object" && (value.byteLength > MAX_CELL_CHARACTERS || value.length > MAX_CELL_CHARACTERS))) return partial("large cell");
+            const text = formatCellValue(value);
+            if (text.length > MAX_CELL_CHARACTERS) return partial("large cell");
+            rowBytes += encoder.encode(text).byteLength;
+            if (bytes + rowBytes > MAX_RESULT_BYTES) return partial("output size");
+            row[column] = text;
+          }
+          bytes += rowBytes;
+          rows.push(row);
+        }
+        // Let the main thread process Stop and deadline events between result batches.
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+      return { columns, rows, truncated: false };
+    }
+
+    async function runBoundedReport(sql, requestId) {
+      const bindings = db;
+      let reject;
+      const stopped = new Promise((resolve, no) => { reject = no; });
+      const operation = { reject, timer: null };
+      activeQueries.add(operation);
+      operation.timer = setTimeout(() => stopReports("Report stopped after 30 seconds. Reconnect, then narrow the query."), REPORT_TIMEOUT_MS);
+      const work = (async () => {
+        let queryConnection = null;
+        let reader = null;
+        let complete = false;
+        try {
+          queryConnection = await bindings.connect();
+          if (requestId !== reportRequestId) return null;
+          await validateCartaSql(sql, queryConnection);
+          if (requestId !== reportRequestId) return null;
+          reader = await queryConnection.send(sql, true);
+          const result = await collectReportRows(reader, requestId);
+          complete = result !== null && !result.truncated;
+          return result;
+        } finally {
+          // A hard stop discards this worker. Never await cleanup messages to a dead worker.
+          if (db === bindings) {
+            try {
+              if (queryConnection && !complete) await queryConnection.cancelSent();
+              if (reader) await reader.cancel();
+            } finally {
+              if (queryConnection) await queryConnection.close();
+            }
+          }
+        }
+      })();
+      try {
+        return await Promise.race([work, stopped]);
+      } finally {
+        clearTimeout(operation.timer);
+        activeQueries.delete(operation);
+        if (!activeQueries.size && activeAiRequestId === null) stopReportBtn.disabled = true;
+      }
+    }
+
     function clearResults() {
       currentRows = [];
       currentColumns = [];
@@ -1050,6 +1189,8 @@
 
     function beginReportRequest(title, message = "Loading data from CARTA S3...") {
       const requestId = ++reportRequestId;
+      currentRequestTitle = title;
+      stopReportBtn.disabled = false;
       clearResults();
       hideError();
       sqlQueryBox.value = "";
@@ -1085,28 +1226,17 @@
 
       const t0 = performance.now();
       try {
-        await validateCartaSql(sql);
-        if (requestId !== reportRequestId) return;
-        const result = await conn.query(sql);
-        if (requestId !== reportRequestId) return;
+        const result = await runBoundedReport(sql, requestId);
+        if (requestId !== reportRequestId || !result) return;
         const elapsedMs = Math.round(performance.now() - t0);
 
-        const columns = result.schema.fields.map((f) => f.name);
-        const rows = result.toArray().map((row) => {
-          const obj = {};
-          for (const col of columns) {
-            obj[col] = formatCellValue(row[col]);
-          }
-          return obj;
-        });
-
-        currentColumns = columns;
-        currentRows = rows;
-        currentReport = { title, elapsedMs };
-        resultsScope.textContent = describeResultScope(rowLimit);
+        currentColumns = result.columns;
+        currentRows = result.rows;
+        currentReport = { title, elapsedMs, truncated: result.truncated };
+        resultsScope.textContent = describeResultScope(rowLimit, result);
         resultsFreshness.textContent = `${describeSourceFreshness(currentRows, sourceTime)} Report retrieved: ${reportTimeFormatter.format(new Date())} (${REPORT_TIME_ZONE}).`;
         exportCsvBtn.disabled = currentRows.length === 0;
-        exportCsvBtn.textContent = `Download all ${currentRows.length.toLocaleString()} loaded rows (CSV)`;
+        exportCsvBtn.textContent = `Download all ${currentRows.length.toLocaleString()} loaded rows (CSV${result.truncated ? ", partial" : ""})`;
         quickSearchInput.disabled = currentRows.length === 0;
         applyQuickFilter();
       } catch (err) {
@@ -1116,11 +1246,14 @@
       }
     }
 
-    function describeResultScope(rowLimit) {
+    function describeResultScope(rowLimit, result = null) {
       const scope = Number.isInteger(rowLimit) && rowLimit > 0
         ? `Limited preview: up to ${rowLimit.toLocaleString()} rows. Additional matching records may exist.`
         : "Query results only; completeness against the full dataset has not been verified.";
-      return `${scope} The quick filter searches loaded rows only. CSV downloads include all loaded rows, including any hidden by the quick filter.`;
+      const safety = result?.truncated
+        ? `Partial result: output was truncated after ${result.rows.length.toLocaleString()} rows (${result.reason}). This is not a complete result. Narrow the report or select fewer columns.`
+        : `Reports load at most ${MAX_RESULT_ROWS.toLocaleString()} rows and also have output-size limits.`;
+      return `${safety} ${scope} The quick filter searches loaded rows only. CSV downloads include all loaded rows, including any hidden by the quick filter.`;
     }
 
     function parseSourceTime(value, format) {
@@ -1211,7 +1344,7 @@
           )
         : currentRows;
       if (currentReport) {
-        resultsMeta.textContent = `${currentReport.title}: ${filtered.length.toLocaleString()} displayed / ${currentRows.length.toLocaleString()} loaded rows (${currentReport.elapsedMs} ms)`;
+        resultsMeta.textContent = `${currentReport.title}: ${filtered.length.toLocaleString()} displayed / ${currentRows.length.toLocaleString()} loaded rows (${currentReport.elapsedMs} ms)${currentReport.truncated ? " [Partial result]" : ""}`;
       }
       renderTable(filtered);
     }
@@ -1408,7 +1541,7 @@
       return blockedPatterns.test(question);
     }
 
-    async function validateCartaSql(sql) {
+    async function validateCartaSql(sql, queryConnection = conn) {
       if (!sql || sql === "UNSUPPORTED_QUERY") {
         throw new Error(
           "Only questions about CARTA datasets (bus routes, stops, vehicle locations, predictions, trip delays, ridership, bike stations, parcels, or addresses) are supported."
@@ -1417,7 +1550,7 @@
 
       if (typeof sql !== "string" || sql.length > 50000) throw new Error("The SQL query is too long.");
       // Bind SQL as a value. Serialization parses it without binding tables or executing it.
-      const statement = await conn.prepare("SELECT json_serialize_sql(CAST(? AS VARCHAR)) AS ast");
+      const statement = await queryConnection.prepare("SELECT json_serialize_sql(CAST(? AS VARCHAR)) AS ast");
       let parsed;
       try {
         const result = await statement.query(sql);
@@ -1664,6 +1797,7 @@ ${schemaText}`;
           await executeQuery(sql, title, null, null, requestId);
         } catch (dbErr) {
           if (requestId !== reportRequestId) return;
+          if (dbErr.code === "REPORT_LIMIT" || /out of memory|memory limit/i.test(dbErr.message || "")) throw dbErr;
           // 1-step self-correction with DuckDB error feedback
           aiStatusText.textContent = "Refining SQL after DuckDB feedback...";
           const retry = await generateSqlWithGroq(apiKey, question, dbErr.message || String(dbErr), requestId);
@@ -1680,6 +1814,7 @@ ${schemaText}`;
         if (activeAiRequestId === requestId) {
           activeAiRequestId = null;
           askAiBtn.disabled = false;
+          if (!activeQueries.size) stopReportBtn.disabled = true;
         }
       }
     });

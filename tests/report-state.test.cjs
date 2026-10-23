@@ -21,17 +21,42 @@ function deferred() {
 }
 
 function result(rows) {
-  return { schema: { fields: Object.keys(rows[0] || {}).map(name => ({ name })) }, toArray: () => rows };
+  return { schema: { fields: Object.keys(rows[0] || {}).map(name => ({ name })) }, numRows: rows.length, get: index => rows[index], toArray: () => rows };
 }
 
 function harness({ actualGenerator = false } = {}) {
   const queries = [], generations = [], apiCalls = [], downloads = [];
-  const context = { console, Blob, performance: { now: () => 0 } };
-  for (const name of ["quickSearchInput", "exportCsvBtn", "resultsMeta", "resultsScope", "resultsFreshness", "sqlQueryBox", "runCustomSqlBtn", "tableContainer", "errorBanner", "askAiBtn", "aiQuestionInput", "groqApiKeyInput", "groqKeyStatus", "aiStatusText", "groqModelSelect"]) {
-    context[name] = { value: "", textContent: "", innerHTML: "", disabled: false, style: {}, listeners: new Map(), addEventListener(type, fn) { this.listeners.set(type, fn); } };
+  const context = { console, Blob, TextEncoder, setTimeout, clearTimeout, performance: { now: () => 0 } };
+  for (const name of ["quickSearchInput", "exportCsvBtn", "resultsMeta", "resultsScope", "resultsFreshness", "sqlQueryBox", "runCustomSqlBtn", "runBuilderBtn", "stopReportBtn", "reconnectBtn", "presetGrid", "dbStatusDot", "dbStatusText", "tableContainer", "errorBanner", "askAiBtn", "aiQuestionInput", "groqApiKeyInput", "groqKeyStatus", "aiStatusText", "groqModelSelect"]) {
+    context[name] = { value: "", textContent: "", innerHTML: "", disabled: false, hidden: false, style: {}, classList: { add() {}, remove() {} }, listeners: new Map(), querySelectorAll: () => [], addEventListener(type, fn) { this.listeners.set(type, fn); } };
   }
+  const connections = [];
+  let terminated = 0, reloaded = 0;
   Object.assign(context, {
     mockConn: { query(sql) { const pending = deferred(); queries.push({ sql, ...pending }); return pending.promise; } },
+    mockDb: {
+      connect: async () => {
+        const connection = {
+          closed: false, cancelled: false,
+          send(sql, streaming) {
+            assert.equal(streaming, true);
+            const pending = deferred(); queries.push({ sql, connection, ...pending });
+            return pending.promise.then(table => {
+              if (table[Symbol.asyncIterator]) return table;
+              const batch = table.numRows === undefined ? result(table.toArray()) : table;
+              return { schema: batch.schema, open: async () => {}, cancel: async () => {}, async *[Symbol.asyncIterator]() { yield batch; } };
+            });
+          },
+          cancelSent: async () => { connection.cancelled = true; return true; },
+          close: async () => { connection.closed = true; }
+        };
+        connections.push(connection);
+        return connection;
+      },
+      detach() {}
+    },
+    mockWorker: { terminate() { terminated++; } },
+    location: { reload() { reloaded++; } },
     localStorage: { setItem() {} },
     GROQ_STORAGE_KEY: "mock-storage-key",
     GROQ_MODELS: ["openai/gpt-oss-120b", "openai/gpt-oss-20b"],
@@ -48,6 +73,7 @@ function harness({ actualGenerator = false } = {}) {
   context.groqApiKeyInput.value = "mock-key";
   context.groqModelSelect.value = "openai/gpt-oss-120b";
   context.aiQuestionInput.value = "List CARTA routes";
+  context.reconnectBtn.hidden = true;
   vm.createContext(context);
   const blocks = [
     section("    // State", "    // DOM elements"),
@@ -59,14 +85,17 @@ function harness({ actualGenerator = false } = {}) {
   ];
   if (actualGenerator) blocks.push(section("    async function generateSqlWithGroq(", '    askAiBtn.addEventListener("click", async () => {'));
   vm.runInContext(blocks.join("\n"), context);
-  vm.runInContext("conn = mockConn;", context);
+  vm.runInContext("conn = mockConn; db = mockDb; duckdbWorker = mockWorker;", context);
   return {
-    ui: context, queries, generations, apiCalls, downloads,
+    ui: context, queries, generations, apiCalls, downloads, connections,
     run: (sql, title = sql) => context.executeQuery(sql, title),
     ask: () => context.askAiBtn.listeners.get("click")(),
     filter(value) { context.quickSearchInput.value = value; context.quickSearchInput.listeners.get("input")(); },
     export: () => context.exportCsvBtn.listeners.get("click")(),
-    state: () => JSON.parse(vm.runInContext("JSON.stringify({ rows: currentRows, columns: currentColumns, report: currentReport, requestId: reportRequestId })", context))
+    stop: () => context.stopReportBtn.listeners.get("click")(),
+    reconnect: () => context.reconnectBtn.listeners.get("click")(),
+    resources: () => ({ terminated, reloaded }),
+    state: () => JSON.parse(vm.runInContext("JSON.stringify({ rows: currentRows, columns: currentColumns, report: currentReport, requestId: reportRequestId, pendingQueries: activeQueries.size })", context))
   };
 }
 
@@ -77,6 +106,9 @@ async function load(h, sql = "initial", rows = [{ stop: "Market" }]) {
   await pending;
 }
 
+module.exports = { harness };
+
+if (require.main === module) {
 test("application JavaScript syntax is valid", () => {
   new vm.Script(source.replace(/^\s*import .*;\s*$/m, ""));
 });
@@ -267,3 +299,152 @@ test("superseded actual Groq generation does not try another model", async () =>
   h.apiCalls[0].resolve({ ok: false, status: 429 }); await ai;
   assert.equal(h.apiCalls.length, 1); assert.equal(h.state().report.title, "preset");
 });
+
+test("output is capped at 5000 rows and partial CSV scope is explicit", async () => {
+  const h = harness();
+  await load(h, "large report", Array.from({ length: 5001 }, (_, n) => ({ number: n })));
+  assert.equal(h.state().rows.length, 5000);
+  assert.equal(h.state().report.truncated, true);
+  assert.match(h.ui.resultsScope.textContent, /Partial result.*5,000.*row limit/);
+  assert.match(h.ui.exportCsvBtn.textContent, /CSV, partial/);
+  assert.match(h.ui.resultsMeta.textContent, /\[Partial result\]/);
+  assert.equal(h.connections[0].cancelled, true);
+  assert.equal(h.connections[0].closed, true);
+});
+
+test("exactly 5000 rows are not falsely marked truncated", async () => {
+  const h = harness();
+  await load(h, "exact cap", Array.from({ length: 5000 }, (_, n) => ({ number: n })));
+  assert.equal(h.state().rows.length, 5000); assert.equal(h.state().report.truncated, false);
+  assert(!h.ui.exportCsvBtn.textContent.includes("partial"));
+});
+
+test("stream consumption stops before reading all batches", async () => {
+  const h = harness(); let batches = 0, cancelled = false;
+  const pending = h.run("streamed report"); await new Promise(setImmediate);
+  h.queries[0].resolve({
+    schema: { fields: [{ name: "number" }] },
+    open: async () => {},
+    cancel: async () => { cancelled = true; },
+    async *[Symbol.asyncIterator]() {
+      for (let batch = 0; batch < 10; batch++) {
+        batches++;
+        yield result(Array.from({ length: 750 }, (_, row) => ({ number: batch * 750 + row })));
+      }
+    }
+  });
+  await pending;
+  assert.equal(batches, 7); assert.equal(h.state().rows.length, 5000);
+  assert.equal(cancelled, true); assert.equal(h.connections[0].closed, true);
+});
+
+test("stream schema is read only after the Arrow reader opens", async () => {
+  const h = harness();
+  const pending = h.run("lazy schema"); await new Promise(setImmediate);
+  const reader = {
+    open: async () => { reader.schema = { fields: [{ name: "number" }] }; },
+    cancel: async () => {},
+    async *[Symbol.asyncIterator]() { yield result([{ number: 42 }]); }
+  };
+  h.queries[0].resolve(reader); await pending;
+  assert.deepEqual(h.state().rows, [{ number: "42" }]);
+  assert.equal(h.connections[0].closed, true);
+});
+
+test("an oversized first row fails without exporting a clipped value", async () => {
+  const h = harness();
+  await assert.rejects(load(h, "large cell", [{ text: "x".repeat(100001) }]), /row is too large/);
+  assert.deepEqual(h.state().rows, []); assert.equal(h.ui.exportCsvBtn.disabled, true);
+  await load(h, "recovery", [{ text: "normal" }]);
+  assert.equal(h.state().report.title, "recovery"); assert.equal(h.resources().terminated, 0);
+});
+
+test("a later oversized row stops at a complete row boundary", async () => {
+  const h = harness();
+  await load(h, "large later cell", [{ text: "first" }, { text: "x".repeat(100001) }, { text: "last" }]);
+  assert.deepEqual(h.state().rows, [{ text: "first" }]);
+  assert.match(h.ui.resultsScope.textContent, /large cell/);
+  assert.equal(h.state().report.truncated, true);
+});
+
+test("the output byte budget counts UTF-8 bytes", async () => {
+  const h = harness();
+  await load(h, "UTF-8 report", Array.from({ length: 30 }, () => ({ text: "😀".repeat(50000) })));
+  assert.equal(h.state().rows.length, 26);
+  assert.equal(h.state().report.truncated, true);
+  assert.match(h.ui.resultsScope.textContent, /output size/);
+});
+
+test("excessive columns are rejected and table size is bounded", async () => {
+  const h = harness();
+  const wide = Object.fromEntries(Array.from({ length: 101 }, (_, n) => ["c" + n, "x"]));
+  await assert.rejects(load(h, "too wide", [wide]), /too many columns/);
+  const row = Object.fromEntries(Array.from({ length: 100 }, (_, n) => ["c" + n, "x"]));
+  await load(h, "many cells", Array.from({ length: 501 }, () => row));
+  assert.equal(h.state().rows.length, 500); assert.equal(h.state().report.truncated, true);
+});
+
+test("Stop terminates an unresponsive worker and exposes Reconnect", async () => {
+  const h = harness(); const pending = h.run("unresponsive"); await new Promise(setImmediate);
+  h.stop(); await pending;
+  assert.equal(h.resources().terminated, 1); assert.equal(h.ui.reconnectBtn.hidden, false);
+  assert.equal(h.ui.runCustomSqlBtn.disabled, true); assert.equal(h.ui.askAiBtn.disabled, true);
+  assert.deepEqual(h.state().rows, []); assert.equal(h.state().pendingQueries, 0);
+  assert.match(h.ui.errorBanner.textContent, /Report stopped/);
+  h.reconnect(); assert.equal(h.resources().reloaded, 1);
+});
+
+test("the deadline stops work even when no result is returned", async () => {
+  const h = harness(); let deadline;
+  h.ui.setTimeout = (fn, ms) => {
+    if (ms === 30000) { deadline = fn; return {}; }
+    return setTimeout(fn, ms);
+  };
+  const pending = h.run("timeout"); await new Promise(setImmediate);
+  assert.equal(typeof deadline, "function"); deadline(); await pending;
+  assert.equal(h.resources().terminated, 1); assert.equal(h.state().pendingQueries, 0);
+  assert.match(h.ui.errorBanner.textContent, /30 seconds/);
+});
+
+test("Stop also recovers from blocked validation or stream cleanup", async () => {
+  const h = harness(); const validation = deferred();
+  h.ui.validateCartaSql = () => validation.promise;
+  const pending = h.run("blocked validation"); await new Promise(setImmediate);
+  h.stop(); await pending;
+  assert.equal(h.queries.length, 0); assert.equal(h.state().pendingQueries, 0);
+  validation.resolve();
+
+  const h2 = harness(); const cleanup = deferred();
+  const pending2 = h2.run("blocked cleanup"); await new Promise(setImmediate);
+  h2.connections[0].cancelSent = () => cleanup.promise;
+  h2.queries[0].resolve(result(Array.from({ length: 5001 }, (_, n) => ({ n }))));
+  await new Promise(setImmediate);
+  h2.stop(); await pending2;
+  assert.equal(h2.resources().terminated, 1); assert.equal(h2.state().pendingQueries, 0);
+  assert.equal(h2.ui.exportCsvBtn.disabled, true); cleanup.resolve(true);
+});
+
+test("AI does not retry output-limit or memory-limit failures", async () => {
+  for (const memoryFailure of [false, true]) {
+    const h = harness(); const ai = h.ask();
+    h.generations[0].resolve({ sql: "large AI report", usedModel: "mock" }); await new Promise(setImmediate);
+    if (memoryFailure) h.queries[0].reject(Error("Out of Memory Error: allocation failed"));
+    else h.queries[0].resolve(result([{ text: "x".repeat(100001) }]));
+    await ai;
+    assert.equal(h.generations.length, 1); assert.equal(h.ui.exportCsvBtn.disabled, true);
+    assert.equal(h.state().pendingQueries, 0);
+  }
+});
+
+test("overlapping streams use isolated connections", async () => {
+  const h = harness();
+  const old = h.run("old stream"); await new Promise(setImmediate);
+  const current = h.run("current stream"); await new Promise(setImmediate);
+  assert.notEqual(h.queries[0].connection, h.queries[1].connection);
+  h.queries[1].resolve(result([{ current: "new" }])); await current;
+  h.queries[0].resolve(result([{ old: "outdated" }])); await old;
+  assert.equal(h.queries[0].connection.cancelled, true);
+  assert.equal(h.queries[1].connection.cancelled, false);
+  assert.deepEqual(h.state().rows, [{ current: "new" }]);
+});
+}
