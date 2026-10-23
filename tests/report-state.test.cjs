@@ -24,10 +24,10 @@ function result(rows) {
   return { schema: { fields: Object.keys(rows[0] || {}).map(name => ({ name })) }, numRows: rows.length, get: index => rows[index], toArray: () => rows };
 }
 
-function harness({ actualGenerator = false } = {}) {
+function harness({ actualGenerator = false, storage = { getItem() { return null; }, setItem() {}, removeItem() {} } } = {}) {
   const queries = [], generations = [], apiCalls = [], downloads = [];
   const context = { console, Blob, TextEncoder, setTimeout, clearTimeout, performance: { now: () => 0 } };
-  for (const name of ["quickSearchInput", "exportCsvBtn", "resultsMeta", "resultsScope", "resultsFreshness", "sqlQueryBox", "runCustomSqlBtn", "runBuilderBtn", "stopReportBtn", "reconnectBtn", "presetGrid", "dbStatusDot", "dbStatusText", "tableContainer", "errorBanner", "askAiBtn", "aiQuestionInput", "groqApiKeyInput", "groqKeyStatus", "aiStatusText", "groqModelSelect"]) {
+  for (const name of ["quickSearchInput", "exportCsvBtn", "resultsMeta", "resultsScope", "resultsFreshness", "sqlQueryBox", "runCustomSqlBtn", "runBuilderBtn", "stopReportBtn", "reconnectBtn", "presetGrid", "dbStatusDot", "dbStatusText", "tableContainer", "errorBanner", "askAiBtn", "aiQuestionInput", "groqApiKeyInput", "groqKeyStatus", "aiStatusText", "groqModelSelect", "saveGroqKeyBtn", "forgetGroqKeyBtn"]) {
     context[name] = { value: "", textContent: "", innerHTML: "", disabled: false, hidden: false, style: {}, classList: { add() {}, remove() {} }, listeners: new Map(), querySelectorAll: () => [], addEventListener(type, fn) { this.listeners.set(type, fn); } };
   }
   const connections = [];
@@ -57,8 +57,7 @@ function harness({ actualGenerator = false } = {}) {
     },
     mockWorker: { terminate() { terminated++; } },
     location: { reload() { reloaded++; } },
-    localStorage: { setItem() {} },
-    GROQ_STORAGE_KEY: "mock-storage-key",
+    localStorage: storage,
     GROQ_MODELS: ["openai/gpt-oss-120b", "openai/gpt-oss-20b"],
     CARTA_NTD_ID: "40001",
     isOffTopicQuestion: () => false,
@@ -70,6 +69,7 @@ function harness({ actualGenerator = false } = {}) {
     URL: { createObjectURL(blob) { downloads.push(blob); return "blob:mock"; }, revokeObjectURL() {} },
     document: { createElement: () => ({ click() {} }) }
   });
+  if (typeof storage === "function") Object.defineProperty(context, "localStorage", { get: storage });
   context.groqApiKeyInput.value = "mock-key";
   context.groqModelSelect.value = "openai/gpt-oss-120b";
   context.aiQuestionInput.value = "List CARTA routes";
@@ -77,6 +77,7 @@ function harness({ actualGenerator = false } = {}) {
   vm.createContext(context);
   const blocks = [
     section("    // State", "    // DOM elements"),
+    section("    const GROQ_STORAGE_KEY", "    // Setup Tabs"),
     section("    const REPORT_TIME_ZONE", "    // Friendly descriptions"),
     section('    runCustomSqlBtn.addEventListener("click", () => {', "    // Execute a SQL query and render table"),
     section("    // Execute a SQL query and render table", "    // ========================================================================="),

@@ -221,6 +221,7 @@
 
     select,
     input[type="text"],
+    input[type="password"],
     input[type="number"],
     textarea {
       width: 100%;
@@ -571,15 +572,22 @@
               id="groqApiKeyInput"
               placeholder="gsk_..."
               autocomplete="off"
+              aria-describedby="groqKeyStorageHelp"
             />
           </div>
-          <button id="saveGroqKeyBtn" class="btn btn-secondary">Save Key</button>
-          <span id="groqKeyStatus" style="font-size: 0.85rem; color: var(--muted); padding-bottom: 0.4rem;"></span>
+          <button id="saveGroqKeyBtn" type="button" class="btn btn-secondary">Remember on this device</button>
+          <button id="forgetGroqKeyBtn" type="button" class="btn btn-secondary">Forget key</button>
+          <span id="groqKeyStatus" role="status" style="font-size: 0.85rem; color: var(--muted); padding-bottom: 0.4rem;"></span>
         </div>
+        <p id="groqKeyStorageHelp" style="margin: 0.5rem 0 0; font-size: 0.8rem; color: var(--muted);">
+          Default: this tab only, cleared on reload or close. Choose Remember on this device to save your key
+          across visits. Avoid remembering keys on shared computers. Forget key removes this app's saved copy;
+          it does not revoke the key at Groq or withdraw requests already sent.
+        </p>
         <div style="margin-top: 0.5rem; font-size: 0.8rem; color: var(--muted); line-height: 1.4;">
           <strong>Public &amp; Partner Notice:</strong> Anyone can use this AI tool by getting a free API key at
           <a href="https://console.groq.com/keys" target="_blank" rel="noopener" style="color: var(--carta-blue);">console.groq.com/keys</a>.
-          Your key is currently saved in this browser and sent directly to Groq for authentication.
+          Your key stays in this tab unless you choose to remember it, and is sent directly to Groq for authentication.
           This application does not record keys or questions in application logs.
           Groq handles requests under its
           <a href="https://console.groq.com/docs/your-data" target="_blank" rel="noopener" style="color: var(--carta-blue);">data policies</a>
@@ -854,29 +862,80 @@
     const groqApiKeyInput = document.getElementById("groqApiKeyInput");
     const groqModelSelect = document.getElementById("groqModelSelect");
     const saveGroqKeyBtn = document.getElementById("saveGroqKeyBtn");
+    const forgetGroqKeyBtn = document.getElementById("forgetGroqKeyBtn");
     const groqKeyStatus = document.getElementById("groqKeyStatus");
     const aiStatusText = document.getElementById("aiStatusText");
     const aiQuestionInput = document.getElementById("aiQuestionInput");
     const askAiBtn = document.getElementById("askAiBtn");
 
-    // Load saved Groq API key from localStorage
+    // Only explicitly remembered keys are persisted. Storage access can throw even on reads.
     const GROQ_STORAGE_KEY = "carta_groq_api_key";
-    const savedGroqKey = localStorage.getItem(GROQ_STORAGE_KEY) || "";
-    if (savedGroqKey) {
-      groqApiKeyInput.value = savedGroqKey;
-      groqKeyStatus.textContent = "Groq API key saved in browser.";
-    } else {
-      groqKeyStatus.textContent = "Enter a free Groq API key for full AI SQL generation.";
+
+    function keepGroqKeyInTab(message) {
+      try {
+        localStorage.removeItem(GROQ_STORAGE_KEY);
+        groqKeyStatus.textContent = message;
+      } catch {
+        groqKeyStatus.textContent = "Browser storage could not be cleared. A saved key may remain; clear this site's browser data. You can still use a key in this tab.";
+      }
     }
+
+    function loadRememberedGroqKey() {
+      groqKeyStatus.textContent = "Enter a key for this tab only, cleared on reload or close.";
+      try {
+        const saved = localStorage.getItem(GROQ_STORAGE_KEY);
+        if (!saved) return;
+        let record;
+        try { record = JSON.parse(saved); } catch { /* Older versions stored the raw key without consent metadata. */ }
+        if (record?.version === 1 && record.remember === true && typeof record.key === "string" && record.key.trim()) {
+          groqApiKeyInput.value = record.key.trim();
+          groqKeyStatus.textContent = "Remembered key loaded from this browser. Use Forget key to remove it.";
+        } else {
+          // Preserve legacy raw keys for this tab, but require fresh consent before persisting them.
+          if (!saved.trim().startsWith("{") && !saved.trim().startsWith("[")) groqApiKeyInput.value = saved.trim();
+          keepGroqKeyInTab(groqApiKeyInput.value
+            ? "Previously saved key is now this tab only. Choose Remember on this device to save it again."
+            : "Invalid saved key removed. Enter a key for this tab only.");
+        }
+      } catch {
+        groqKeyStatus.textContent = "Browser storage is unavailable. Enter a key for this tab. A previously saved key may remain; clear this site's browser data to remove it.";
+      }
+    }
+
+    loadRememberedGroqKey();
+
+    groqApiKeyInput.addEventListener("input", () => {
+      keepGroqKeyInTab(groqApiKeyInput.value.trim()
+        ? "Key is available in this tab only, cleared on reload or close."
+        : "Enter a key for this tab only, cleared on reload or close.");
+    });
 
     saveGroqKeyBtn.addEventListener("click", () => {
       const key = groqApiKeyInput.value.trim();
-      if (key) {
-        localStorage.setItem(GROQ_STORAGE_KEY, key);
-        groqKeyStatus.textContent = "Groq API key saved in browser (GPT-OSS 120B ready).";
-      } else {
-        localStorage.removeItem(GROQ_STORAGE_KEY);
-        groqKeyStatus.textContent = "Key cleared.";
+      if (!key) {
+        groqKeyStatus.textContent = "Enter a key before choosing Remember on this device.";
+        return;
+      }
+      try {
+        localStorage.setItem(GROQ_STORAGE_KEY, JSON.stringify({ version: 1, remember: true, key }));
+        groqKeyStatus.textContent = "Key remembered on this device across visits. Use Forget key to remove it.";
+      } catch {
+        keepGroqKeyInTab("Could not remember the key. It is available in this tab only, cleared on reload or close.");
+      }
+    });
+
+    forgetGroqKeyBtn.addEventListener("click", () => {
+      groqApiKeyInput.value = "";
+      keepGroqKeyInTab("Key forgotten in this tab and removed from this browser's saved storage.");
+      if (activeAiRequestId !== null) {
+        if (activeAiRequestId === reportRequestId) {
+          beginReportRequest("AI request canceled", "Key forgotten. Choose a public report or enter a new key.");
+          resultsMeta.textContent = "AI request canceled after forgetting the key.";
+          resultsFreshness.textContent = "No report loaded.";
+        }
+        activeAiRequestId = null;
+        askAiBtn.disabled = !conn;
+        if (!activeQueries.size) stopReportBtn.disabled = true;
       }
     });
 
@@ -1776,10 +1835,6 @@ ${schemaText}`;
       if (!question) return;
 
       const apiKey = groqApiKeyInput.value.trim();
-      if (apiKey) {
-        localStorage.setItem(GROQ_STORAGE_KEY, apiKey);
-        groqKeyStatus.textContent = "Groq API key saved in browser.";
-      }
 
       askAiBtn.disabled = true;
       const title = `AI Search: "${question}"`;
