@@ -475,7 +475,7 @@
     <!-- TAB 1: ONE-CLICK PRESETS -->
     <section id="panel-presets" class="panel active">
       <h2>One-Click Reports for Customer Service &amp; Operations</h2>
-      <p class="panel-subtitle">Click any report below to pull live data immediately without writing SQL.</p>
+      <p class="panel-subtitle">Click a report to query the published data. Check its source timestamp before treating it as current.</p>
       <div id="presetGrid" class="preset-grid"></div>
     </section>
 
@@ -617,6 +617,8 @@
         </div>
       </div>
 
+      <div id="resultsFreshness" class="panel-subtitle" role="status" aria-live="polite"></div>
+
       <details class="sql-details">
         <summary>View or Edit SQL Query</summary>
         <div class="sql-editor-row">
@@ -643,6 +645,12 @@
     const GROQ_MODELS = Object.freeze(["openai/gpt-oss-120b", "openai/gpt-oss-20b"]);
     // FTA agency identifier, verified against the NTD ID column in the public dataset.
     const CARTA_NTD_ID = "40001";
+    const REPORT_TIME_ZONE = "America/New_York";
+    const reportTimeFormatter = new Intl.DateTimeFormat("en-US", {
+      timeZone: REPORT_TIME_ZONE,
+      year: "numeric", month: "short", day: "numeric",
+      hour: "numeric", minute: "2-digit", second: "2-digit", timeZoneName: "short"
+    });
 
     // Friendly descriptions for CARTA datasets
     const DATASET_INFO = {
@@ -723,26 +731,30 @@
       {
         title: "Latest Bus Vehicle Positions",
         tag: "Customer Service",
-        desc: "View the 100 most recent real-time vehicle position rows.",
-        sql: "SELECT * FROM data.gtfsrt_vehicle_positions_v1 LIMIT 100;"
+        desc: "View up to 100 vehicle positions, newest observation first.",
+        sql: 'SELECT * FROM data.gtfsrt_vehicle_positions_v1 ORDER BY NULLIF("timestamp", 0) DESC NULLS LAST LIMIT 100;',
+        sourceTime: { column: "timestamp", format: "unix-seconds" }
       },
       {
         title: "Clever Vehicle Locations",
         tag: "Operations / Paratransit",
-        desc: "Check 100 recent vehicle location records from Clever Devices.",
-        sql: "SELECT * FROM data.clever_vehicle_locations_v1 LIMIT 100;"
+        desc: "Check up to 100 Clever vehicle locations, newest timestamp first.",
+        sql: 'SELECT * FROM data.clever_vehicle_locations_v1 ORDER BY TRY_CAST("timestamp" AS TIMESTAMPTZ) DESC NULLS LAST LIMIT 100;',
+        sourceTime: { column: "timestamp", format: "iso" }
       },
       {
-        title: "Upcoming Stop Predictions",
+        title: "Stop Predictions (Clever)",
         tag: "Customer Service",
-        desc: "View 100 Clever arrival/departure prediction records.",
-        sql: "SELECT * FROM data.clever_predictions_v1 LIMIT 100;"
+        desc: "Show the newest prediction batches first, then the earliest predicted times.",
+        sql: `SELECT * FROM data.clever_predictions_v1 ORDER BY try_strptime("tmstmp", '%Y%m%d %H:%M') DESC NULLS LAST, try_strptime("prdtm", '%Y%m%d %H:%M') ASC NULLS LAST LIMIT 100;`,
+        sourceTime: { column: "tmstmp", format: "clever-local" }
       },
       {
-        title: "Real-Time Trip Updates & Delays",
+        title: "Trip Updates & Delays (GTFS-RT)",
         tag: "Customer Service",
-        desc: "Inspect real-time GTFS-RT trip updates and schedule adherence.",
-        sql: "SELECT * FROM data.gtfsrt_trip_updates_v1 LIMIT 100;"
+        desc: "Inspect published trip updates. This dataset does not include an observation timestamp.",
+        sql: "SELECT * FROM data.gtfsrt_trip_updates_v1 LIMIT 100;",
+        sourceTime: { unavailable: "Source observation time unavailable: this dataset has no observation timestamp. Predicted arrival and departure times do not establish freshness." }
       },
       {
         title: "All CARTA Bus Routes",
@@ -793,6 +805,7 @@
     const sqlQueryBox = document.getElementById("sqlQueryBox");
     const runCustomSqlBtn = document.getElementById("runCustomSqlBtn");
     const resultsMeta = document.getElementById("resultsMeta");
+    const resultsFreshness = document.getElementById("resultsFreshness");
     const errorBanner = document.getElementById("errorBanner");
     const tableContainer = document.getElementById("tableContainer");
     const exportCsvBtn = document.getElementById("exportCsvBtn");
@@ -852,7 +865,7 @@
           <span class="preset-card-tag">${escapeHtml(report.tag)}</span>
         `;
         btn.addEventListener("click", () => {
-          executeQuery(report.sql, report.title);
+          executeQuery(report.sql, report.title, report.sourceTime);
         });
         presetGrid.appendChild(btn);
       });
@@ -1009,11 +1022,12 @@
     });
 
     // Execute a SQL query and render table
-    async function executeQuery(sql, title = "Query Results") {
+    async function executeQuery(sql, title = "Query Results", sourceTime = null) {
       if (!conn) return;
       hideError();
       sqlQueryBox.value = sql;
       resultsMeta.textContent = `Running: ${title}...`;
+      resultsFreshness.textContent = "Checking source timestamps...";
       tableContainer.innerHTML = `<div class="empty-state">Loading data from CARTA S3...</div>`;
       exportCsvBtn.disabled = true;
 
@@ -1032,14 +1046,59 @@
         });
 
         resultsMeta.textContent = `${title}: ${currentRows.length.toLocaleString()} rows (${elapsedMs} ms)`;
+        resultsFreshness.textContent = `${describeSourceFreshness(currentRows, sourceTime)} Report retrieved: ${reportTimeFormatter.format(new Date())} (${REPORT_TIME_ZONE}).`;
         exportCsvBtn.disabled = currentRows.length === 0;
         renderTable(currentRows);
       } catch (err) {
         resultsMeta.textContent = `${title}: Error`;
+        resultsFreshness.textContent = "Source freshness unavailable because the query failed.";
         tableContainer.innerHTML = `<div class="empty-state">Query could not be completed.</div>`;
         showError(err.message || String(err));
         throw err;
       }
+    }
+
+    function parseSourceTime(value, format) {
+      if (value === null || value === undefined || String(value).trim() === "") return null;
+      const text = String(value).trim();
+      if (format === "clever-local") {
+        const match = text.match(/^(\d{4})(\d{2})(\d{2}) (\d{2}):(\d{2})$/);
+        if (!match) return null;
+        const localTime = `${match[1]}-${match[2]}-${match[3]}T${match[4]}:${match[5]}`;
+        // Use UTC only to validate and order wall-clock values, never to infer their timezone.
+        const date = new Date(`${localTime}:00Z`);
+        if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0, 16) !== localTime) return null;
+        return { order: date.getTime(), label: `${localTime.replace("T", " ")} (source local time; timezone not supplied)` };
+      }
+      let milliseconds;
+      if (format === "unix-seconds") {
+        const seconds = Number(text);
+        if (!Number.isFinite(seconds) || seconds <= 0) return null;
+        milliseconds = seconds * 1000;
+      } else if (format === "iso" && /(?:Z|[+-]\d{2}:\d{2})$/i.test(text)) {
+        milliseconds = Date.parse(text);
+      } else {
+        return null;
+      }
+      const date = new Date(milliseconds);
+      if (!Number.isFinite(date.getTime())) return null;
+      return { order: date.getTime(), label: `${reportTimeFormatter.format(date)} (${REPORT_TIME_ZONE})` };
+    }
+
+    function describeSourceFreshness(rows, sourceTime) {
+      if (!rows.length) return "No records returned; source observation time unavailable.";
+      if (sourceTime?.unavailable) return sourceTime.unavailable;
+      if (!sourceTime) return "Source observation time not identified for this report.";
+      let newest = null;
+      let missing = 0;
+      for (const row of rows) {
+        const timestamp = parseSourceTime(row[sourceTime.column], sourceTime.format);
+        if (!timestamp) missing++;
+        else if (!newest || timestamp.order > newest.order) newest = timestamp;
+      }
+      if (!newest) return "Source observation time unavailable: timestamps are missing or invalid.";
+      const missingNote = missing ? ` ${missing} of ${rows.length} rows have missing or invalid source timestamps.` : "";
+      return `Newest source timestamp in returned rows: ${newest.label}.${missingNote}`;
     }
 
     function formatCellValue(val) {
