@@ -27,7 +27,7 @@ function result(rows) {
 function harness({ actualGenerator = false } = {}) {
   const queries = [], generations = [], apiCalls = [], downloads = [];
   const context = { console, Blob, performance: { now: () => 0 } };
-  for (const name of ["quickSearchInput", "exportCsvBtn", "resultsMeta", "resultsScope", "resultsFreshness", "sqlQueryBox", "tableContainer", "errorBanner", "askAiBtn", "aiQuestionInput", "groqApiKeyInput", "groqKeyStatus", "aiStatusText", "groqModelSelect"]) {
+  for (const name of ["quickSearchInput", "exportCsvBtn", "resultsMeta", "resultsScope", "resultsFreshness", "sqlQueryBox", "runCustomSqlBtn", "tableContainer", "errorBanner", "askAiBtn", "aiQuestionInput", "groqApiKeyInput", "groqKeyStatus", "aiStatusText", "groqModelSelect"]) {
     context[name] = { value: "", textContent: "", innerHTML: "", disabled: false, style: {}, listeners: new Map(), addEventListener(type, fn) { this.listeners.set(type, fn); } };
   }
   Object.assign(context, {
@@ -52,6 +52,7 @@ function harness({ actualGenerator = false } = {}) {
   const blocks = [
     section("    // State", "    // DOM elements"),
     section("    const REPORT_TIME_ZONE", "    // Friendly descriptions"),
+    section('    runCustomSqlBtn.addEventListener("click", () => {', "    // Execute a SQL query and render table"),
     section("    // Execute a SQL query and render table", "    // ========================================================================="),
     section('    askAiBtn.addEventListener("click", async () => {', "    function showError("),
     section("    function showError(", "    initDuckDB();")
@@ -71,6 +72,7 @@ function harness({ actualGenerator = false } = {}) {
 
 async function load(h, sql = "initial", rows = [{ stop: "Market" }]) {
   const pending = h.run(sql);
+  await new Promise(setImmediate);
   h.queries.at(-1).resolve(result(rows));
   await pending;
 }
@@ -88,6 +90,7 @@ test("starting a report invalidates old rows and blocks filtering and export", a
   const loading = h.ui.tableContainer.innerHTML;
   h.filter("Market"); h.export();
   assert.equal(h.ui.tableContainer.innerHTML, loading); assert.equal(h.downloads.length, 0);
+  await new Promise(setImmediate);
   h.queries.at(-1).resolve(result([{ route: "4" }])); await pending;
   assert.deepEqual(h.state().columns, ["route"]);
   assert.equal(h.ui.quickSearchInput.disabled, false);
@@ -97,6 +100,7 @@ test("starting a report invalidates old rows and blocks filtering and export", a
 test("a failed report cannot restore or export previous rows", async () => {
   const h = harness(); await load(h);
   const pending = h.run("failure");
+  await new Promise(setImmediate);
   h.queries.at(-1).reject(Error("network unavailable"));
   await assert.rejects(pending, /network unavailable/);
   const errorTable = h.ui.tableContainer.innerHTML;
@@ -110,7 +114,9 @@ test("a failed report cannot restore or export previous rows", async () => {
 
 test("an old success cannot replace a newer report", async () => {
   const h = harness();
-  const old = h.run("old"); const current = h.run("current");
+  const old = h.run("old"); await new Promise(setImmediate);
+  const current = h.run("current");
+  await new Promise(setImmediate);
   h.queries[1].resolve(result([{ current_column: "new" }])); await current;
   const view = h.ui.tableContainer.innerHTML;
   h.queries[0].resolve(result([{ old_column: "old" }])); await old;
@@ -122,7 +128,9 @@ test("an old success cannot replace a newer report", async () => {
 });
 
 test("an old success stays hidden while the current query is pending", async () => {
-  const h = harness(); const old = h.run("old"); const current = h.run("current");
+  const h = harness(); const old = h.run("old"); await new Promise(setImmediate);
+  const current = h.run("current");
+  await new Promise(setImmediate);
   h.queries[0].resolve(result([{ old: "outdated" }])); await old;
   assert.equal(h.state().report, null); assert.deepEqual(h.state().rows, []);
   assert.match(h.ui.resultsMeta.textContent, /Running: current/);
@@ -131,7 +139,9 @@ test("an old success stays hidden while the current query is pending", async () 
 
 test("an old failure cannot overwrite current success or pending state", async () => {
   for (const finishCurrentFirst of [true, false]) {
-    const h = harness(); const old = h.run("old"); const current = h.run("current");
+    const h = harness(); const old = h.run("old"); await new Promise(setImmediate);
+    const current = h.run("current");
+    await new Promise(setImmediate);
     if (finishCurrentFirst) { h.queries[1].resolve(result([{ current: "new" }])); await current; }
     h.queries[0].reject(Error("outdated error")); await old;
     assert.equal(h.ui.errorBanner.textContent, "");
@@ -142,7 +152,9 @@ test("an old failure cannot overwrite current success or pending state", async (
 });
 
 test("a failed current request cannot be replaced by an old successful result", async () => {
-  const h = harness(); const old = h.run("old"); const current = h.run("current");
+  const h = harness(); const old = h.run("old"); await new Promise(setImmediate);
+  const current = h.run("current");
+  await new Promise(setImmediate);
   h.queries[1].reject(Error("current error")); await assert.rejects(current, /current error/);
   h.queries[0].resolve(result([{ old: "outdated" }])); await old;
   assert.equal(h.state().report, null); assert.deepEqual(h.state().rows, []);
@@ -153,9 +165,42 @@ test("empty results and conversion failures leave no exportable data", async () 
   const h = harness(); await load(h, "empty", []);
   assert(h.ui.exportCsvBtn.disabled); assert(h.ui.quickSearchInput.disabled);
   const pending = h.run("conversion failure");
+  await new Promise(setImmediate);
   h.queries.at(-1).resolve({ schema: { fields: [{ name: "new" }] }, toArray() { throw Error("bad result"); } });
   await assert.rejects(pending, /bad result/);
   assert.deepEqual(h.state().rows, []); assert.deepEqual(h.state().columns, []);
+});
+
+test("a validation failure never reaches the database query method", async () => {
+  const h = harness(); await load(h);
+  h.ui.validateCartaSql = async () => { throw Error("policy rejected SQL"); };
+  await assert.rejects(h.run("blocked"), /policy rejected SQL/);
+  assert.equal(h.queries.length, 1);
+  assert.deepEqual(h.state().rows, []);
+  assert.equal(h.ui.errorBanner.textContent, "policy rejected SQL");
+});
+
+test("the manual SQL button uses the execution policy and handles rejection", async () => {
+  const h = harness();
+  h.ui.sqlQueryBox.value = "blocked SQL";
+  h.ui.validateCartaSql = async () => { throw Error("policy rejected SQL"); };
+  h.ui.runCustomSqlBtn.listeners.get("click")();
+  await new Promise(setImmediate);
+  assert.equal(h.queries.length, 0);
+  assert.equal(h.ui.errorBanner.textContent, "policy rejected SQL");
+  assert.equal(h.ui.exportCsvBtn.disabled, true);
+});
+
+test("supersession during validation prevents obsolete SQL from being submitted", async () => {
+  const h = harness(); const gate = deferred();
+  h.ui.validateCartaSql = () => gate.promise;
+  const old = h.run("old");
+  h.ui.validateCartaSql = async () => {};
+  await load(h, "current", [{ current: "new" }]);
+  gate.resolve(); await old;
+  assert.equal(h.queries.length, 1);
+  assert.equal(h.queries[0].sql, "current");
+  assert.equal(h.state().report.title, "current");
 });
 
 test("filter counts and CSV contents belong to the latest completed report", async () => {
@@ -171,6 +216,7 @@ test("superseded AI generation cannot execute SQL or restore old results", async
   const ai = h.ask();
   assert.deepEqual(h.state().rows, []); assert.equal(h.ui.sqlQueryBox.value, "");
   const current = h.run("preset");
+  await new Promise(setImmediate);
   h.queries.at(-1).resolve(result([{ preset: "current" }])); await current;
   h.generations[0].resolve({ sql: "outdated AI SQL", usedModel: "mock" }); await ai;
   assert.equal(h.queries.length, 2); assert.equal(h.state().report.title, "preset");
