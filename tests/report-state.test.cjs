@@ -447,4 +447,105 @@ test("overlapping streams use isolated connections", async () => {
   assert.equal(h.queries[1].connection.cancelled, false);
   assert.deepEqual(h.state().rows, [{ current: "new" }]);
 });
+
+test("actual AI requests send the disclosed schemas, samples, question and retry error without logging", async () => {
+  const h = harness({ actualGenerator: true });
+  const requests = [], logs = [];
+  h.ui.console = Object.fromEntries(["log", "info", "warn", "error", "debug", "trace"].map(method => [method, (...args) => logs.push(args)]));
+  vm.runInContext('availableViews = ["simple_bus_routes", "simple_bus_stops"];', h.ui);
+  h.ui.VIEW_KEYWORDS = {};
+  h.ui.matchBestView = () => "simple_bus_routes";
+  h.ui.getColumnsForView = async () => [{ name: "name", type: "VARCHAR" }];
+  h.ui.mockConn.query = async () => result([{ name: "Public route sample" }]);
+  h.ui.fetch = async (url, options) => {
+    requests.push({ url, ...options, body: JSON.parse(options.body) });
+    return { ok: true, json: async () => ({ choices: [{ message: { content: "SELECT * FROM data.simple_bus_routes" } }] }) };
+  };
+  vm.runInContext([
+    section("    const sampleCache", "    function extractSql("),
+    section("    async function callGroqChat(", "    async function generateSqlWithGroq(")
+  ].join("\n"), h.ui);
+
+  const question = "List CARTA routes";
+  const retryError = 'Binder Error: missing column in SELECT "private example"';
+  await h.ui.generateSqlWithGroq("mock-secret-key", question);
+  await h.ui.generateSqlWithGroq("mock-secret-key", question, retryError);
+  assert.equal(requests.length, 2);
+  for (const request of requests) {
+    assert.equal(request.url, "https://api.groq.com/openai/v1/chat/completions");
+    assert.equal(request.method, "POST");
+    assert.equal(request.headers.Authorization, "Bearer mock-secret-key");
+    assert(!JSON.stringify(request.body).includes("mock-secret-key"));
+    const [system, user] = request.body.messages;
+    assert.equal(system.role, "system");
+    assert.match(system.content, /Table data.simple_bus_routes: "name" \(VARCHAR\)/);
+    assert.match(system.content, /Sample row.*Public route sample/);
+    assert.match(system.content, /Other available tables: data.simple_bus_stops/);
+    assert.equal(user.role, "user");
+    assert(user.content.includes(question));
+  }
+  assert.equal(requests[0].body.messages[1].content, question);
+  assert(!JSON.stringify(requests[0].body).includes(retryError));
+  assert(requests[1].body.messages[1].content.includes(retryError));
+  assert.deepEqual(logs, []);
+});
+
+for (const status of [400, 404, 429, 401]) {
+  test(`actual Groq HTTP ${status} handling stays within the approved fallback models without logging`, async () => {
+    const h = harness({ actualGenerator: true });
+    const logs = [];
+    h.ui.console = Object.fromEntries(["log", "info", "warn", "error", "debug", "trace"].map(method => [method, (...args) => logs.push(args)]));
+    const pending = h.ui.generateSqlWithGroq("mock-secret-key", "List CARTA routes");
+    // Attach rejection handling before resolving the asynchronous HTTP failure.
+    const rejected = status === 401 ? assert.rejects(pending, /HTTP 401/) : null;
+    await new Promise(setImmediate);
+    h.apiCalls[0].resolve({ ok: false, status, text: async () => "mock private error body" });
+    await new Promise(setImmediate);
+    if (status === 401) {
+      await rejected;
+      assert.deepEqual(h.apiCalls.map(call => call.model), ["openai/gpt-oss-120b"]);
+    } else {
+      assert.deepEqual(h.apiCalls.map(call => call.model), ["openai/gpt-oss-120b", "openai/gpt-oss-20b"]);
+      h.apiCalls[1].resolve({ ok: true, json: async () => ({ choices: [{ message: { content: "SELECT * FROM data.simple_bus_routes" } }] }) });
+      assert.equal((await pending).usedModel, "openai/gpt-oss-20b");
+    }
+    assert.deepEqual(logs, []);
+  });
+}
+
+for (const failStartup of [false, true]) {
+  test(`DuckDB startup ${failStartup ? "failure" : "success"} uses a silent logger without console output`, async () => {
+    const h = harness();
+    const logs = [];
+    let suppliedLogger;
+    class VoidLogger { log() {} }
+    h.ui.console = Object.fromEntries(["log", "info", "warn", "error", "debug", "trace"].map(method => [method, (...args) => logs.push(args)]));
+    h.ui.duckdb = {
+      VoidLogger,
+      getJsDelivrBundles: () => ({}),
+      selectBundle: async () => ({ mainWorker: "worker.js", mainModule: "module.wasm" }),
+      AsyncDuckDB: class {
+        constructor(logger) { suppliedLogger = logger; }
+        async instantiate() { if (failStartup) throw Error("mock secret initialization detail"); }
+        async open() {}
+        async connect() { return { query: async () => result([{ view_name: "simple_bus_routes" }]) }; }
+      }
+    };
+    h.ui.Worker = class { addEventListener() {} };
+    h.ui.renderPresets = () => {};
+    h.ui.populateDatasetDropdown = () => {};
+    h.ui.REMOTE_DUCKDB_URL = "https://example.invalid/catalog.duckdb";
+    vm.runInContext(section("    async function initDuckDB()", "    function populateDatasetDropdown()"), h.ui);
+    await h.ui.initDuckDB();
+    assert(suppliedLogger instanceof VoidLogger);
+    assert.deepEqual(logs, []);
+    if (failStartup) {
+      assert.equal(h.ui.dbStatusText.textContent, "Connection error");
+      assert.match(h.ui.errorBanner.textContent, /mock secret initialization detail/);
+    } else {
+      assert.match(h.ui.dbStatusText.textContent, /Connected \(1 CARTA datasets ready\)/);
+      assert.equal(h.ui.askAiBtn.disabled, false);
+    }
+  });
+}
 }
