@@ -1,0 +1,1479 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CARTA Open Data Explorer</title>
+  <style>
+    :root {
+      --bg: #f4f6f9;
+      --card: #ffffff;
+      --primary: #0056b3;
+      --primary-hover: #004085;
+      --accent: #0ea5e9;
+      --text: #1e293b;
+      --muted: #64748b;
+      --border: #e2e8f0;
+      --success: #16a34a;
+      --warning: #d97706;
+      --danger: #dc2626;
+      --code-bg: #0f172a;
+      --code-text: #e2e8f0;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background-color: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+    }
+
+    header {
+      background: linear-gradient(135deg, #003b7a 0%, #0056b3 100%);
+      color: #ffffff;
+      padding: 1.25rem 2rem;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+    }
+
+    header h1 {
+      margin: 0;
+      font-size: 1.4rem;
+      font-weight: 700;
+    }
+
+    header p {
+      margin: 0.2rem 0 0;
+      font-size: 0.9rem;
+      opacity: 0.9;
+    }
+
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      background: rgba(255, 255, 255, 0.15);
+      padding: 0.4rem 0.85rem;
+      border-radius: 999px;
+      font-size: 0.85rem;
+      font-weight: 500;
+    }
+
+    .status-dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: #fbbf24;
+    }
+
+    .status-dot.ready {
+      background: #4ade80;
+    }
+
+    .status-dot.error {
+      background: #f87171;
+    }
+
+    main {
+      max-width: 1400px;
+      margin: 1.5rem auto;
+      padding: 0 1.5rem 3rem;
+    }
+
+    /* Tabs */
+    .tabs {
+      display: flex;
+      gap: 0.5rem;
+      margin-bottom: 1rem;
+      border-bottom: 2px solid var(--border);
+      padding-bottom: 0.5rem;
+      flex-wrap: wrap;
+    }
+
+    .tab-btn {
+      background: var(--card);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 0.65rem 1.2rem;
+      border-radius: 8px;
+      font-size: 0.95rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .tab-btn:hover {
+      border-color: var(--primary);
+      color: var(--primary);
+    }
+
+    .tab-btn.active {
+      background: var(--primary);
+      color: #ffffff;
+      border-color: var(--primary);
+    }
+
+    .panel {
+      display: none;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1.25rem;
+      margin-bottom: 1.25rem;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+    }
+
+    .panel.active {
+      display: block;
+    }
+
+    .panel h2 {
+      margin: 0 0 0.35rem;
+      font-size: 1.1rem;
+    }
+
+    .panel-subtitle {
+      margin: 0 0 1rem;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+
+    /* Preset Report Cards */
+    .preset-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      gap: 0.85rem;
+    }
+
+    .preset-card {
+      background: #f8fafc;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.95rem 1rem;
+      text-align: left;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      gap: 0.4rem;
+    }
+
+    .preset-card:hover {
+      border-color: var(--primary);
+      background: #eff6ff;
+      transform: translateY(-1px);
+      box-shadow: 0 3px 8px rgba(0, 86, 179, 0.08);
+    }
+
+    .preset-card-title {
+      font-weight: 600;
+      font-size: 0.95rem;
+      color: var(--primary);
+    }
+
+    .preset-card-desc {
+      font-size: 0.82rem;
+      color: var(--muted);
+    }
+
+    .preset-card-tag {
+      display: inline-block;
+      align-self: flex-start;
+      font-size: 0.72rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      background: #e0f2fe;
+      color: #0369a1;
+      padding: 0.15rem 0.5rem;
+      border-radius: 4px;
+      margin-top: 0.25rem;
+    }
+
+    /* Form Controls */
+    .form-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+      gap: 0.85rem;
+      align-items: end;
+    }
+
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+    }
+
+    .form-group label {
+      font-size: 0.82rem;
+      font-weight: 600;
+      color: var(--muted);
+    }
+
+    select,
+    input[type="text"],
+    input[type="number"],
+    textarea {
+      width: 100%;
+      padding: 0.55rem 0.75rem;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font-size: 0.9rem;
+      font-family: inherit;
+      color: var(--text);
+      background: #ffffff;
+    }
+
+    select:focus,
+    input:focus,
+    textarea:focus {
+      outline: 2px solid var(--accent);
+      border-color: transparent;
+    }
+
+    .btn {
+      background: var(--primary);
+      color: #ffffff;
+      border: none;
+      padding: 0.6rem 1.1rem;
+      border-radius: 6px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s ease;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.4rem;
+    }
+
+    .btn:hover:not(:disabled) {
+      background: var(--primary-hover);
+    }
+
+    .btn:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+    }
+
+    .btn-secondary {
+      background: #e2e8f0;
+      color: var(--text);
+    }
+
+    .btn-secondary:hover:not(:disabled) {
+      background: #cbd5e1;
+    }
+
+    .btn-success {
+      background: var(--success);
+    }
+
+    .btn-success:hover:not(:disabled) {
+      background: #15803d;
+    }
+
+    /* AI Section */
+    .ai-setup-bar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      align-items: center;
+      background: #f8fafc;
+      border: 1px solid var(--border);
+      padding: 0.85rem 1rem;
+      border-radius: 8px;
+      margin-bottom: 1rem;
+    }
+
+    .progress-bar-wrap {
+      width: 100%;
+      background: #e2e8f0;
+      height: 8px;
+      border-radius: 999px;
+      overflow: hidden;
+      display: none;
+    }
+
+    .progress-bar-fill {
+      background: var(--primary);
+      height: 100%;
+      width: 0%;
+      transition: width 0.2s ease;
+    }
+
+    .chip-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.45rem;
+      margin: 0.65rem 0 1rem;
+    }
+
+    .chip {
+      background: #f1f5f9;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 0.3rem 0.75rem;
+      font-size: 0.8rem;
+      color: var(--text);
+      cursor: pointer;
+    }
+
+    .chip:hover {
+      background: #e0f2fe;
+      border-color: var(--accent);
+    }
+
+    /* Results Area */
+    .results-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1.25rem;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+    }
+
+    .results-toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.75rem;
+      margin-bottom: 0.85rem;
+    }
+
+    .results-meta {
+      font-size: 0.9rem;
+      font-weight: 600;
+    }
+
+    .results-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      align-items: center;
+    }
+
+    .sql-details {
+      margin-bottom: 0.85rem;
+      background: var(--code-bg);
+      color: var(--code-text);
+      border-radius: 6px;
+      padding: 0.6rem 0.9rem;
+      font-size: 0.83rem;
+    }
+
+    .sql-details summary {
+      cursor: pointer;
+      font-weight: 600;
+      color: #93c5fd;
+    }
+
+    .sql-editor-row {
+      display: flex;
+      gap: 0.5rem;
+      margin-top: 0.6rem;
+      align-items: flex-start;
+    }
+
+    .sql-editor-row textarea {
+      background: #1e293b;
+      color: #f8fafc;
+      border: 1px solid #334155;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 0.83rem;
+      min-height: 60px;
+    }
+
+    .error-banner {
+      display: none;
+      background: #fef2f2;
+      border: 1px solid #fecaca;
+      color: var(--danger);
+      padding: 0.75rem 1rem;
+      border-radius: 6px;
+      margin-bottom: 0.85rem;
+      font-size: 0.88rem;
+      white-space: pre-wrap;
+    }
+
+    .table-container {
+      width: 100%;
+      overflow-x: auto;
+      max-height: 540px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.85rem;
+      text-align: left;
+    }
+
+    thead th {
+      position: sticky;
+      top: 0;
+      background: #f8fafc;
+      color: var(--text);
+      font-weight: 600;
+      padding: 0.65rem 0.75rem;
+      border-bottom: 2px solid var(--border);
+      white-space: nowrap;
+    }
+
+    tbody td {
+      padding: 0.55rem 0.75rem;
+      border-bottom: 1px solid var(--border);
+      max-width: 340px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    tbody tr:hover {
+      background: #f1f5f9;
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 2.5rem 1rem;
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>CARTA Open Data Explorer</h1>
+      <p>Point-and-click reports, custom filters, and local AI search powered by DuckDB in your browser</p>
+    </div>
+    <div class="status-badge">
+      <span id="dbStatusDot" class="status-dot"></span>
+      <span id="dbStatusText">Connecting to CARTA DuckDB...</span>
+    </div>
+  </header>
+
+  <main>
+    <div class="tabs">
+      <button class="tab-btn active" data-tab="panel-presets">1. One-Click Reports</button>
+      <button class="tab-btn" data-tab="panel-builder">2. Visual Filter Builder</button>
+      <button class="tab-btn" data-tab="panel-ai">3. Ask in Plain English (Local AI)</button>
+    </div>
+
+    <!-- TAB 1: ONE-CLICK PRESETS -->
+    <section id="panel-presets" class="panel active">
+      <h2>One-Click Reports for Customer Service &amp; Operations</h2>
+      <p class="panel-subtitle">Click any report below to pull live data immediately without writing SQL.</p>
+      <div id="presetGrid" class="preset-grid"></div>
+    </section>
+
+    <!-- TAB 2: VISUAL FILTER BUILDER -->
+    <section id="panel-builder" class="panel">
+      <h2>Visual Filter Builder</h2>
+      <p class="panel-subtitle">Pick a dataset, choose a column to filter or sort by, and click Run Report.</p>
+      <div class="form-grid">
+        <div class="form-group">
+          <label for="builderDataset">Dataset</label>
+          <select id="builderDataset"></select>
+        </div>
+        <div class="form-group">
+          <label for="builderColumn">Filter Column</label>
+          <select id="builderColumn">
+            <option value="">(No filter, show all)</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="builderOperator">Condition</label>
+          <select id="builderOperator">
+            <option value="ILIKE_CONTAINS">Contains</option>
+            <option value="=">Equals (=)</option>
+            <option value="ILIKE_STARTS">Starts with</option>
+            <option value=">">Greater than (&gt;)</option>
+            <option value="<">Less than (&lt;)</option>
+            <option value=">=">Greater or equal (&gt;=)</option>
+            <option value="<=">Less or equal (&lt;=)</option>
+            <option value="IS NOT NULL">Is not empty</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="builderValue">Filter Value</label>
+          <input type="text" id="builderValue" placeholder="e.g. 4 or Market" />
+        </div>
+        <div class="form-group">
+          <label for="builderSortCol">Sort By</label>
+          <select id="builderSortCol">
+            <option value="">(Default order)</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="builderSortDir">Sort Direction</label>
+          <select id="builderSortDir">
+            <option value="DESC">Newest / Highest First (DESC)</option>
+            <option value="ASC">Oldest / Lowest First (ASC)</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="builderLimit">Max Rows</label>
+          <select id="builderLimit">
+            <option value="50">50 rows</option>
+            <option value="100" selected>100 rows</option>
+            <option value="250">250 rows</option>
+            <option value="500">500 rows</option>
+            <option value="1000">1,000 rows</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <button id="runBuilderBtn" class="btn" disabled>Run Report</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 3: PLAIN ENGLISH LOCAL AI -->
+    <section id="panel-ai" class="panel">
+      <h2>Ask a Question in Plain English</h2>
+      <p class="panel-subtitle">
+        Translates plain-English questions into DuckDB SQL using live column names from CARTA's datasets.
+        Works instantly out of the box, with optional Local Ollama or WebGPU model support.
+      </p>
+
+      <div class="ai-setup-bar">
+        <div class="form-group" style="min-width: 320px;">
+          <label for="aiEngineMode">Translation Engine</label>
+          <select id="aiEngineMode">
+            <option value="builtin" selected>Built-In Smart SQL Translator (Instant, No Download, Recommended)</option>
+            <option value="ollama">Local Ollama Server (http://localhost:11434, qwen2.5-coder:3b)</option>
+            <option value="webgpu-0.5b">Experimental WebGPU: Qwen2.5-Coder-0.5B (~900 MB)</option>
+            <option value="webgpu-1.5b">Experimental WebGPU: Qwen2.5-Coder-1.5B (~1.5 GB)</option>
+          </select>
+        </div>
+        <button id="initAiBtn" class="btn" style="display: none;">Connect / Load Engine</button>
+        <span id="aiStatusText" style="font-size: 0.85rem; color: var(--muted);">
+          Ready: Built-in schema-aware SQL translator active.
+        </span>
+        <div id="aiProgressWrap" class="progress-bar-wrap">
+          <div id="aiProgressFill" class="progress-bar-fill"></div>
+        </div>
+      </div>
+
+      <div class="chip-row">
+        <span style="font-size: 0.8rem; color: var(--muted); align-self: center;">Try an example:</span>
+        <button class="chip" data-prompt="Show all bus routes from simple_bus_routes">List all bus routes</button>
+        <button class="chip" data-prompt="Show 25 recent vehicle locations from clever_vehicle_locations_v1">Recent Clever vehicle locations</button>
+        <button class="chip" data-prompt="Show the top 20 Bike Chattanooga stations ordered by capacity">Bike stations by capacity</button>
+        <button class="chip" data-prompt="Show monthly ridership records from ntd_monthly_ridership_v1">Monthly ridership summary</button>
+      </div>
+
+      <div style="display: flex; gap: 0.65rem; flex-wrap: wrap;">
+        <input
+          type="text"
+          id="aiQuestionInput"
+          placeholder="Type what you want to find (e.g., 'Show all bus stops with Market in the name')..."
+          style="flex: 1; min-width: 260px;"
+        />
+        <button id="askAiBtn" class="btn" disabled>Ask AI &amp; Run</button>
+      </div>
+    </section>
+
+    <!-- RESULTS TABLE -->
+    <section class="results-card">
+      <div class="results-toolbar">
+        <div id="resultsMeta" class="results-meta">No report loaded yet</div>
+        <div class="results-actions">
+          <input
+            type="text"
+            id="quickSearchInput"
+            placeholder="Quick filter displayed rows..."
+            style="width: 220px; padding: 0.45rem 0.65rem; font-size: 0.85rem;"
+          />
+          <button id="exportCsvBtn" class="btn btn-success" disabled>Download CSV (Excel)</button>
+        </div>
+      </div>
+
+      <details class="sql-details">
+        <summary>View or Edit SQL Query</summary>
+        <div class="sql-editor-row">
+          <textarea id="sqlQueryBox" spellcheck="false"></textarea>
+          <button id="runCustomSqlBtn" class="btn btn-secondary" disabled>Run SQL</button>
+        </div>
+      </details>
+
+      <div id="errorBanner" class="error-banner"></div>
+
+      <div id="tableContainer" class="table-container">
+        <div class="empty-state">
+          Select one of the <strong>One-Click Reports</strong> above to view CARTA data.
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script type="module">
+    import * as duckdb from "https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@latest/+esm";
+
+    // URL to attach data.duckdb from GitHub Raw (avoids the S3 .wal 403 error)
+    const REMOTE_DUCKDB_URL = "https://raw.githubusercontent.com/gocarta/data.duckdb/main/data.duckdb";
+
+    // Friendly descriptions for CARTA datasets
+    const DATASET_INFO = {
+      gtfsrt_vehicle_positions_v1: {
+        label: "Live Bus Positions (GTFS-RT)",
+        tag: "Customer Service",
+        desc: "Real-time bus coordinates, vehicle IDs, route IDs, and timestamps."
+      },
+      clever_vehicle_locations_v1: {
+        label: "Clever Vehicle Locations",
+        tag: "Operations / Paratransit",
+        desc: "Vehicle location history and status reported by Clever Devices."
+      },
+      clever_predictions_v1: {
+        label: "Clever Stop Predictions",
+        tag: "Customer Service",
+        desc: "Predicted arrival and departure times for upcoming stops."
+      },
+      gtfsrt_trip_updates_v1: {
+        label: "Trip Delays & Updates (GTFS-RT)",
+        tag: "Customer Service",
+        desc: "Real-time trip delay updates and stop time adjustments."
+      },
+      simple_bus_routes: {
+        label: "Bus Routes Directory",
+        tag: "Reference",
+        desc: "List of CARTA bus routes, route numbers, and route names."
+      },
+      simple_bus_stops: {
+        label: "Bus Stops Directory",
+        tag: "Customer Service",
+        desc: "All CARTA bus stop names, IDs, and geographic coordinates."
+      },
+      scheduled_bus_trips_v1: {
+        label: "Scheduled Bus Trips",
+        tag: "Scheduling",
+        desc: "Scheduled trips across routes and service patterns."
+      },
+      scheduled_stop_times_v1: {
+        label: "Scheduled Stop Times",
+        tag: "Scheduling",
+        desc: "Scheduled arrival and departure times at individual stops."
+      },
+      scheduled_service_dates_v1: {
+        label: "Scheduled Service Dates",
+        tag: "Scheduling",
+        desc: "Active calendar service dates for CARTA schedules."
+      },
+      ntd_monthly_ridership_v1: {
+        label: "NTD Monthly Ridership",
+        tag: "Management",
+        desc: "Monthly ridership totals reported to the National Transit Database."
+      },
+      bike_chattanooga_stations_v1: {
+        label: "Bike Chattanooga Stations",
+        tag: "Mobility",
+        desc: "Bike share station names, locations, and dock capacity."
+      },
+      bicycle_repair_stations_v1: {
+        label: "Bicycle Repair Stations",
+        tag: "Mobility",
+        desc: "Public bicycle repair stand locations across Chattanooga."
+      },
+      hamilton_county_parcels_v1: {
+        label: "Hamilton County Parcels",
+        tag: "GIS",
+        desc: "Property parcel boundaries and attributes in Hamilton County."
+      },
+      tn_ng911_address_points: {
+        label: "TN NG911 Address Points",
+        tag: "GIS",
+        desc: "Emergency 911 address points and location data."
+      }
+    };
+
+    // Preset one-click reports
+    const PRESET_REPORTS = [
+      {
+        title: "Latest Bus Vehicle Positions",
+        tag: "Customer Service",
+        desc: "View the 100 most recent real-time vehicle position rows.",
+        sql: "SELECT * FROM data.gtfsrt_vehicle_positions_v1 LIMIT 100;"
+      },
+      {
+        title: "Clever Vehicle Locations",
+        tag: "Operations / Paratransit",
+        desc: "Check 100 recent vehicle location records from Clever Devices.",
+        sql: "SELECT * FROM data.clever_vehicle_locations_v1 LIMIT 100;"
+      },
+      {
+        title: "Upcoming Stop Predictions",
+        tag: "Customer Service",
+        desc: "View 100 Clever arrival/departure prediction records.",
+        sql: "SELECT * FROM data.clever_predictions_v1 LIMIT 100;"
+      },
+      {
+        title: "Real-Time Trip Updates & Delays",
+        tag: "Customer Service",
+        desc: "Inspect real-time GTFS-RT trip updates and schedule adherence.",
+        sql: "SELECT * FROM data.gtfsrt_trip_updates_v1 LIMIT 100;"
+      },
+      {
+        title: "All CARTA Bus Routes",
+        tag: "Reference",
+        desc: "Complete directory of CARTA bus routes.",
+        sql: "SELECT * FROM data.simple_bus_routes LIMIT 200;"
+      },
+      {
+        title: "All CARTA Bus Stops",
+        tag: "Customer Service",
+        desc: "Browse bus stops to look up stop IDs and names for riders.",
+        sql: "SELECT * FROM data.simple_bus_stops LIMIT 250;"
+      },
+      {
+        title: "Monthly Ridership Report (NTD)",
+        tag: "Management",
+        desc: "View National Transit Database monthly ridership figures.",
+        sql: "SELECT * FROM data.ntd_monthly_ridership_v1 LIMIT 200;"
+      },
+      {
+        title: "Bike Chattanooga Stations",
+        tag: "Mobility",
+        desc: "All Bike Chattanooga stations and dock capacities.",
+        sql: "SELECT * FROM data.bike_chattanooga_stations_v1 LIMIT 100;"
+      }
+    ];
+
+    // State
+    let db = null;
+    let conn = null;
+    let availableViews = [];
+    const schemaCache = {}; // viewName -> [{ name, type }]
+    let currentRows = [];
+    let currentColumns = [];
+    let webllmEngine = null;
+    let loadedWebllmModel = null;
+
+    // DOM elements
+    const dbStatusDot = document.getElementById("dbStatusDot");
+    const dbStatusText = document.getElementById("dbStatusText");
+    const presetGrid = document.getElementById("presetGrid");
+    const builderDataset = document.getElementById("builderDataset");
+    const builderColumn = document.getElementById("builderColumn");
+    const builderOperator = document.getElementById("builderOperator");
+    const builderValue = document.getElementById("builderValue");
+    const builderSortCol = document.getElementById("builderSortCol");
+    const builderSortDir = document.getElementById("builderSortDir");
+    const builderLimit = document.getElementById("builderLimit");
+    const runBuilderBtn = document.getElementById("runBuilderBtn");
+    const sqlQueryBox = document.getElementById("sqlQueryBox");
+    const runCustomSqlBtn = document.getElementById("runCustomSqlBtn");
+    const resultsMeta = document.getElementById("resultsMeta");
+    const errorBanner = document.getElementById("errorBanner");
+    const tableContainer = document.getElementById("tableContainer");
+    const exportCsvBtn = document.getElementById("exportCsvBtn");
+    const quickSearchInput = document.getElementById("quickSearchInput");
+
+    // AI DOM elements
+    const aiEngineMode = document.getElementById("aiEngineMode");
+    const initAiBtn = document.getElementById("initAiBtn");
+    const aiStatusText = document.getElementById("aiStatusText");
+    const aiProgressWrap = document.getElementById("aiProgressWrap");
+    const aiProgressFill = document.getElementById("aiProgressFill");
+    const aiQuestionInput = document.getElementById("aiQuestionInput");
+    const askAiBtn = document.getElementById("askAiBtn");
+
+    // Setup Tabs
+    document.querySelectorAll(".tab-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("active"));
+        document.querySelectorAll(".panel").forEach((p) => p.classList.remove("active"));
+        btn.classList.add("active");
+        document.getElementById(btn.dataset.tab).classList.add("active");
+      });
+    });
+
+    // Render Preset Cards
+    function renderPresets() {
+      presetGrid.innerHTML = "";
+      PRESET_REPORTS.forEach((report) => {
+        const btn = document.createElement("button");
+        btn.className = "preset-card";
+        btn.innerHTML = `
+          <div>
+            <div class="preset-card-title">${escapeHtml(report.title)}</div>
+            <div class="preset-card-desc">${escapeHtml(report.desc)}</div>
+          </div>
+          <span class="preset-card-tag">${escapeHtml(report.tag)}</span>
+        `;
+        btn.addEventListener("click", () => {
+          executeQuery(report.sql, report.title);
+        });
+        presetGrid.appendChild(btn);
+      });
+    }
+
+    // Initialize DuckDB-Wasm
+    async function initDuckDB() {
+      try {
+        renderPresets();
+        const JSDELIVR_BUNDLES = duckdb.getJsDelivrBundles();
+        const bundle = await duckdb.selectBundle(JSDELIVR_BUNDLES);
+        const workerUrl = URL.createObjectURL(
+          new Blob([`importScripts("${bundle.mainWorker}");`], { type: "text/javascript" })
+        );
+        const worker = new Worker(workerUrl);
+        const logger = new duckdb.ConsoleLogger();
+        db = new duckdb.AsyncDuckDB(logger, worker);
+        await db.instantiate(bundle.mainModule, bundle.pthreadWorker);
+        URL.revokeObjectURL(workerUrl);
+
+        await db.open({
+          path: ":memory:",
+          query: {
+            castBigIntToDouble: true,
+            castDecimalToDouble: true,
+            castTimestampToDate: true
+          }
+        });
+        conn = await db.connect();
+
+        await conn.query(`ATTACH '${REMOTE_DUCKDB_URL}' AS data (READ_ONLY);`);
+
+        // Get list of views in data
+        const viewsResult = await conn.query(`
+          SELECT view_name 
+          FROM duckdb_views() 
+          WHERE database_name = 'data' AND NOT internal 
+          ORDER BY view_name;
+        `);
+        availableViews = viewsResult.toArray().map((r) => r.view_name);
+
+        populateDatasetDropdown();
+        dbStatusDot.classList.add("ready");
+        dbStatusText.textContent = `Connected (${availableViews.length} CARTA datasets ready)`;
+        runBuilderBtn.disabled = false;
+        runCustomSqlBtn.disabled = false;
+        if (aiEngineMode.value === "builtin") {
+          askAiBtn.disabled = false;
+        }
+      } catch (err) {
+        console.error(err);
+        dbStatusDot.classList.add("error");
+        dbStatusText.textContent = "Connection error";
+        showError(`Failed to initialize DuckDB: ${err.message || err}`);
+      }
+    }
+
+    function populateDatasetDropdown() {
+      builderDataset.innerHTML = "";
+      availableViews.forEach((viewName) => {
+        const info = DATASET_INFO[viewName];
+        const opt = document.createElement("option");
+        opt.value = viewName;
+        opt.textContent = info ? `${info.label} (${viewName})` : viewName;
+        builderDataset.appendChild(opt);
+      });
+      if (availableViews.length > 0) {
+        loadColumnsForDataset(availableViews[0]);
+      }
+    }
+
+    async function getColumnsForView(viewName) {
+      if (schemaCache[viewName]) {
+        return schemaCache[viewName];
+      }
+      const res = await conn.query(`DESCRIBE SELECT * FROM data.${viewName};`);
+      const cols = res.toArray().map((row) => ({
+        name: row.column_name,
+        type: row.column_type
+      }));
+      schemaCache[viewName] = cols;
+      return cols;
+    }
+
+    async function loadColumnsForDataset(viewName) {
+      builderColumn.innerHTML = `<option value="">Loading columns...</option>`;
+      builderSortCol.innerHTML = `<option value="">Loading columns...</option>`;
+      try {
+        const cols = await getColumnsForView(viewName);
+        builderColumn.innerHTML = `<option value="">(No filter, show all)</option>`;
+        builderSortCol.innerHTML = `<option value="">(Default order)</option>`;
+        cols.forEach((c) => {
+          const opt1 = document.createElement("option");
+          opt1.value = c.name;
+          opt1.textContent = `${c.name} (${c.type})`;
+          builderColumn.appendChild(opt1);
+
+          const opt2 = document.createElement("option");
+          opt2.value = c.name;
+          opt2.textContent = `${c.name} (${c.type})`;
+          builderSortCol.appendChild(opt2);
+        });
+      } catch (err) {
+        builderColumn.innerHTML = `<option value="">(Could not load columns)</option>`;
+        builderSortCol.innerHTML = `<option value="">(Default order)</option>`;
+      }
+    }
+
+    builderDataset.addEventListener("change", () => {
+      loadColumnsForDataset(builderDataset.value);
+    });
+
+    // Build and execute query from Visual Filter Builder
+    runBuilderBtn.addEventListener("click", () => {
+      const view = builderDataset.value;
+      const col = builderColumn.value;
+      const op = builderOperator.value;
+      const val = builderValue.value.trim();
+      const sortCol = builderSortCol.value;
+      const sortDir = builderSortDir.value;
+      const limit = parseInt(builderLimit.value, 10) || 100;
+
+      let sql = `SELECT * FROM data."${view}"`;
+      if (col) {
+        const safeCol = `"${col.replace(/"/g, '""')}"`;
+        const safeVal = val.replace(/'/g, "''");
+        if (op === "IS NOT NULL") {
+          sql += ` WHERE ${safeCol} IS NOT NULL`;
+        } else if (val !== "") {
+          if (op === "ILIKE_CONTAINS") {
+            sql += ` WHERE CAST(${safeCol} AS VARCHAR) ILIKE '%${safeVal}%'`;
+          } else if (op === "ILIKE_STARTS") {
+            sql += ` WHERE CAST(${safeCol} AS VARCHAR) ILIKE '${safeVal}%'`;
+          } else {
+            const isNum = !isNaN(Number(val)) && val !== "";
+            const rhs = isNum ? val : `'${safeVal}'`;
+            sql += ` WHERE ${safeCol} ${op} ${rhs}`;
+          }
+        }
+      }
+      if (sortCol) {
+        const safeSort = `"${sortCol.replace(/"/g, '""')}"`;
+        sql += ` ORDER BY ${safeSort} ${sortDir}`;
+      }
+      sql += ` LIMIT ${limit};`;
+
+      const label = DATASET_INFO[view]?.label || view;
+      executeQuery(sql, label);
+    });
+
+    runCustomSqlBtn.addEventListener("click", () => {
+      const sql = sqlQueryBox.value.trim();
+      if (sql) {
+        executeQuery(sql, "Custom SQL Query");
+      }
+    });
+
+    // Execute a SQL query and render table
+    async function executeQuery(sql, title = "Query Results") {
+      if (!conn) return;
+      hideError();
+      sqlQueryBox.value = sql;
+      resultsMeta.textContent = `Running: ${title}...`;
+      tableContainer.innerHTML = `<div class="empty-state">Loading data from CARTA S3...</div>`;
+      exportCsvBtn.disabled = true;
+
+      const t0 = performance.now();
+      try {
+        const result = await conn.query(sql);
+        const elapsedMs = Math.round(performance.now() - t0);
+
+        currentColumns = result.schema.fields.map((f) => f.name);
+        currentRows = result.toArray().map((row) => {
+          const obj = {};
+          for (const col of currentColumns) {
+            obj[col] = formatCellValue(row[col]);
+          }
+          return obj;
+        });
+
+        resultsMeta.textContent = `${title}: ${currentRows.length.toLocaleString()} rows (${elapsedMs} ms)`;
+        exportCsvBtn.disabled = currentRows.length === 0;
+        renderTable(currentRows);
+      } catch (err) {
+        resultsMeta.textContent = `${title}: Error`;
+        tableContainer.innerHTML = `<div class="empty-state">Query could not be completed.</div>`;
+        showError(err.message || String(err));
+        throw err;
+      }
+    }
+
+    function formatCellValue(val) {
+      if (val === null || val === undefined) return "";
+      if (val instanceof Date) return val.toISOString();
+      if (typeof val === "object") {
+        try {
+          return JSON.stringify(val);
+        } catch {
+          return String(val);
+        }
+      }
+      return String(val);
+    }
+
+    function renderTable(rows) {
+      if (rows.length === 0) {
+        tableContainer.innerHTML = `<div class="empty-state">No matching records found.</div>`;
+        return;
+      }
+
+      const thead = `<thead><tr>${currentColumns
+        .map((c) => `<th>${escapeHtml(c)}</th>`)
+        .join("")}</tr></thead>`;
+
+      const tbody = `<tbody>${rows
+        .map(
+          (r) =>
+            `<tr>${currentColumns
+              .map((c) => `<td title="${escapeHtml(r[c])}">${escapeHtml(r[c])}</td>`)
+              .join("")}</tr>`
+        )
+        .join("")}</tbody>`;
+
+      tableContainer.innerHTML = `<table>${thead}${tbody}</table>`;
+    }
+
+    // Quick client-side row search
+    quickSearchInput.addEventListener("input", () => {
+      const term = quickSearchInput.value.trim().toLowerCase();
+      if (!term) {
+        renderTable(currentRows);
+        return;
+      }
+      const filtered = currentRows.filter((row) =>
+        currentColumns.some((col) => String(row[col]).toLowerCase().includes(term))
+      );
+      renderTable(filtered);
+    });
+
+    // Export current results to CSV
+    exportCsvBtn.addEventListener("click", () => {
+      if (!currentRows.length) return;
+      const csvLines = [
+        currentColumns.map(csvEscape).join(","),
+        ...currentRows.map((row) => currentColumns.map((col) => csvEscape(row[col])).join(","))
+      ];
+      const blob = new Blob([csvLines.join("\r\n")], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `carta_report_${new Date().toISOString().slice(0, 10)}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    });
+
+    function csvEscape(val) {
+      const str = String(val ?? "");
+      if (str.includes(",") || str.includes('"') || str.includes("\n")) {
+        return `"${str.replace(/"/g, '""')}"`;
+      }
+      return str;
+    }
+
+    // =========================================================================
+    // PLAIN ENGLISH TO SQL (Built-In Schema-Aware Translator + Optional Ollama/WebGPU)
+    // =========================================================================
+    const VIEW_KEYWORDS = {
+      bike_chattanooga_stations_v1: ["bike", "chattanooga", "station", "stations", "dock", "docks", "capacity", "bikes", "bikeshare"],
+      bicycle_repair_stations_v1: ["repair", "bicycle repair", "stand", "pump", "tools"],
+      clever_vehicle_locations_v1: ["clever", "vehicle location", "vehicle locations", "paratransit", "bus location"],
+      clever_predictions_v1: ["prediction", "predictions", "arrival", "arrivals", "departure", "upcoming", "eta"],
+      gtfsrt_vehicle_positions_v1: ["gtfsrt", "live bus", "vehicle position", "vehicle positions", "real-time", "realtime", "gps"],
+      gtfsrt_trip_updates_v1: ["delay", "delays", "trip update", "trip updates", "late", "adherence"],
+      ntd_monthly_ridership_v1: ["ridership", "ntd", "monthly", "passenger", "passengers", "boardings", "upt", "summary"],
+      simple_bus_routes: ["route", "routes", "bus route", "bus routes", "line", "lines"],
+      simple_bus_stops: ["stop", "stops", "bus stop", "bus stops", "shelter"],
+      scheduled_bus_trips_v1: ["scheduled trip", "scheduled trips", "bus trip", "bus trips"],
+      scheduled_stop_times_v1: ["stop time", "stop times", "timetable", "scheduled time"],
+      scheduled_service_dates_v1: ["service date", "service dates", "calendar", "holiday"],
+      hamilton_county_parcels_v1: ["parcel", "parcels", "property", "hamilton", "land", "tax"],
+      tn_ng911_address_points: ["address", "addresses", "911", "ng911", "street"]
+    };
+
+    aiEngineMode.addEventListener("change", () => {
+      const mode = aiEngineMode.value;
+      hideError();
+      if (mode === "builtin") {
+        initAiBtn.style.display = "none";
+        aiProgressWrap.style.display = "none";
+        aiStatusText.textContent = "Ready: Built-in schema-aware SQL translator active.";
+        if (conn) askAiBtn.disabled = false;
+      } else {
+        initAiBtn.style.display = "inline-flex";
+        aiStatusText.textContent = "Click 'Connect / Load Engine' to initialize.";
+      }
+    });
+
+    initAiBtn.addEventListener("click", async () => {
+      const mode = aiEngineMode.value;
+      hideError();
+      if (mode === "builtin") {
+        askAiBtn.disabled = false;
+        return;
+      }
+
+      if (mode === "ollama") {
+        aiStatusText.textContent = "Testing connection to local Ollama (http://localhost:11434)...";
+        try {
+          const res = await fetch("http://localhost:11434/api/tags");
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          aiStatusText.textContent = "Connected to Local Ollama (qwen2.5-coder:3b ready)";
+          askAiBtn.disabled = false;
+        } catch (err) {
+          showError(
+            "Could not reach Ollama at http://localhost:11434.\nMake sure Ollama is running with: $env:OLLAMA_ORIGINS=\"*\"; ollama serve\nand that you have run: ollama pull qwen2.5-coder:3b"
+          );
+          aiStatusText.textContent = "Ollama connection failed.";
+        }
+        return;
+      }
+
+      const modelId =
+        mode === "webgpu-0.5b"
+          ? "Qwen2.5-Coder-0.5B-Instruct-q4f16_1-MLC"
+          : "Qwen2.5-Coder-1.5B-Instruct-q4f16_1-MLC";
+
+      try {
+        initAiBtn.disabled = true;
+        aiProgressWrap.style.display = "block";
+        aiProgressFill.style.width = "2%";
+        aiStatusText.textContent = `Loading ${modelId} into WebGPU...`;
+
+        const webllm = await import("https://esm.run/@mlc-ai/web-llm");
+        webllmEngine = await webllm.CreateMLCEngine(
+          modelId,
+          {
+            initProgressCallback: (report) => {
+              aiStatusText.textContent = report.text;
+              if (typeof report.progress === "number") {
+                aiProgressFill.style.width = `${Math.round(report.progress * 100)}%`;
+              }
+            }
+          },
+          {
+            context_window_size: 1024
+          }
+        );
+
+        loadedWebllmModel = modelId;
+        aiProgressWrap.style.display = "none";
+        aiStatusText.textContent = `Ready: ${modelId} loaded`;
+        askAiBtn.disabled = false;
+      } catch (err) {
+        console.error(err);
+        aiProgressWrap.style.display = "none";
+        aiStatusText.textContent = "WebGPU unavailable; using Built-In Smart SQL Translator.";
+        aiEngineMode.value = "builtin";
+        initAiBtn.style.display = "none";
+        askAiBtn.disabled = false;
+      } finally {
+        initAiBtn.disabled = false;
+      }
+    });
+
+    // Example prompt chips
+    document.querySelectorAll(".chip").forEach((chip) => {
+      chip.addEventListener("click", () => {
+        aiQuestionInput.value = chip.dataset.prompt;
+        if (!askAiBtn.disabled) {
+          askAiBtn.click();
+        }
+      });
+    });
+
+    aiQuestionInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !askAiBtn.disabled) {
+        askAiBtn.click();
+      }
+    });
+
+    function matchBestView(question) {
+      const qLower = question.toLowerCase();
+      // 1. Exact view name match in prompt
+      for (const v of availableViews) {
+        if (qLower.includes(v.toLowerCase())) {
+          return v;
+        }
+      }
+
+      // 2. Score against keywords and DATASET_INFO
+      let bestView = availableViews.includes("simple_bus_routes")
+        ? "simple_bus_routes"
+        : availableViews[0];
+      let bestScore = -1;
+
+      for (const v of availableViews) {
+        let score = 0;
+        const kws = VIEW_KEYWORDS[v] || [];
+        for (const kw of kws) {
+          if (qLower.includes(kw)) {
+            score += kw.includes(" ") ? 8 : 4;
+          }
+        }
+        // Disambiguate bike stations vs repair stations
+        if (v === "bicycle_repair_stations_v1" && !qLower.includes("repair")) {
+          score -= 5;
+        }
+        const info = DATASET_INFO[v] || {};
+        const words = `${v} ${info.label || ""}`.toLowerCase().split(/\W+/);
+        for (const w of words) {
+          if (w.length >= 4 && w !== "data" && qLower.includes(w)) {
+            score += 2;
+          }
+        }
+        if (score > bestScore) {
+          bestScore = score;
+          bestView = v;
+        }
+      }
+      return bestView;
+    }
+
+    function findMatchingColumn(cols, phrase) {
+      if (!phrase) return null;
+      const target = phrase.toLowerCase().replace(/[^a-z0-9]/g, "");
+      if (!target) return null;
+
+      // 1. Exact normalized match
+      for (const c of cols) {
+        const norm = c.name.toLowerCase().replace(/[^a-z0-9]/g, "");
+        if (norm === target) return c.name;
+      }
+      // 2. Column contains phrase or phrase contains column
+      let bestCol = null;
+      let bestScore = 0;
+      const tokens = phrase.toLowerCase().split(/\W+/).filter((t) => t.length >= 3);
+      for (const c of cols) {
+        const cLower = c.name.toLowerCase();
+        const cWords = cLower.split(/[^a-z0-9]+/).filter(Boolean);
+        let score = 0;
+        if (cLower.includes(target)) score += 6;
+        for (const t of tokens) {
+          if (cWords.includes(t)) score += 5;
+          else if (cLower.includes(t)) score += 3;
+        }
+        if (score > bestScore) {
+          bestScore = score;
+          bestCol = c.name;
+        }
+      }
+      return bestScore > 0 ? bestCol : null;
+    }
+
+    async function translateQuestionToSql(question) {
+      const viewName = matchBestView(question);
+      aiStatusText.textContent = `Inspecting schema for ${viewName}...`;
+      const cols = await getColumnsForView(viewName);
+      const qLower = question.toLowerCase();
+
+      // 1. Check if user is asking for a row count
+      if (/\b(how many|count of|total number of)\b/i.test(question)) {
+        return `SELECT COUNT(*) AS total_records FROM data.${viewName};`;
+      }
+
+      // 2. Extract row limit (ignore numbers attached to v1 or 911)
+      const qWithoutView = question.replace(new RegExp(viewName, "gi"), "").replace(/\b911\b/g, "");
+      const limitMatch =
+        qWithoutView.match(/\b(?:top|first|show|limit|last|recent)\s+(\d{1,4})\b/i) ||
+        qWithoutView.match(/\b(\d{1,4})\s+(?:rows|records|stations|routes|stops|locations|vehicles|trips)\b/i);
+      const limit = limitMatch ? Math.min(Math.max(parseInt(limitMatch[1], 10), 1), 1000) : 100;
+
+      // 3. Check for filter criteria
+      let whereClause = "";
+      // Pattern A: "with <VAL> in the <COL>" (e.g., "with Market in the name")
+      const withInMatch = question.match(/\bwith\s+['"]?([a-zA-Z0-9_\-\s]+?)['"]?\s+in\s+(?:the\s+)?([a-zA-Z0-9_]+)\b/i);
+      // Pattern B: "where <COL> is/equals/contains <VAL>"
+      const whereMatch = question.match(/\bwhere\s+([a-zA-Z0-9_\s]+?)\s+(?:is|equals|=|contains|like)\s+['"]?([a-zA-Z0-9_\-]+)['"]?/i);
+      // Pattern C: "containing '<VAL>'" or "named '<VAL>'"
+      const namedMatch = question.match(/\b(?:named|containing|called)\s+['"]?([a-zA-Z0-9_\-]+)['"]?/i);
+
+      if (withInMatch) {
+        const val = withInMatch[1].trim().replace(/'/g, "''");
+        const col = findMatchingColumn(cols, withInMatch[2]) || cols.find((c) => /name|title|desc|id/i.test(c.name))?.name;
+        if (col && val) {
+          whereClause = ` WHERE CAST("${col}" AS VARCHAR) ILIKE '%${val}%'`;
+        }
+      } else if (whereMatch) {
+        const col = findMatchingColumn(cols, whereMatch[1]);
+        const val = whereMatch[2].trim().replace(/'/g, "''");
+        if (col && val) {
+          whereClause = ` WHERE CAST("${col}" AS VARCHAR) ILIKE '%${val}%'`;
+        }
+      } else if (namedMatch) {
+        const val = namedMatch[1].trim().replace(/'/g, "''");
+        const col = cols.find((c) => /name|title|route|stop/i.test(c.name))?.name || cols[0]?.name;
+        if (col && val) {
+          whereClause = ` WHERE CAST("${col}" AS VARCHAR) ILIKE '%${val}%'`;
+        }
+      }
+
+      // 4. Check for ORDER BY criteria
+      let orderClause = "";
+      const orderMatch = question.match(/\b(?:ordered\s+by|order\s+by|sorted\s+by|sort\s+by|by)\s+([a-zA-Z0-9_\s]+?)(?:\s+(asc|desc|ascending|descending))?$/i);
+      if (orderMatch) {
+        const col = findMatchingColumn(cols, orderMatch[1]);
+        if (col) {
+          const explicitAsc = /\b(asc|ascending|lowest|smallest|oldest|least)\b/i.test(question);
+          const explicitDesc = /\b(desc|descending|top|highest|most|largest|biggest|recent|latest|newest)\b/i.test(question);
+          const dir = explicitAsc ? "ASC" : explicitDesc ? "DESC" : "DESC";
+          orderClause = ` ORDER BY "${col}" ${dir}`;
+        }
+      } else if (/\b(recent|latest|newest)\b/i.test(qLower)) {
+        const timeCol = cols.find((c) => /time|date|timestamp|updated|created|year/i.test(c.name))?.name;
+        if (timeCol) {
+          orderClause = ` ORDER BY "${timeCol}" DESC`;
+        }
+      }
+
+      return `SELECT * FROM data.${viewName}${whereClause}${orderClause} LIMIT ${limit};`;
+    }
+
+    async function buildSchemaPromptForQuestion(question) {
+      const bestView = matchBestView(question);
+      try {
+        aiStatusText.textContent = `Reading columns for ${bestView}...`;
+        const cols = await getColumnsForView(bestView);
+        const colStr = cols.map((c) => `"${c.name}" (${c.type})`).join(", ");
+        return `Table data.${bestView} has columns: ${colStr}`;
+      } catch {
+        return `Table data.${bestView}`;
+      }
+    }
+
+    async function generateSqlWithAi(systemPrompt, userPrompt) {
+      const mode = aiEngineMode.value;
+      if (mode === "builtin") {
+        return translateQuestionToSql(userPrompt);
+      }
+      if (mode === "ollama") {
+        const res = await fetch("http://localhost:11434/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            model: "qwen2.5-coder:3b",
+            stream: false,
+            options: { temperature: 0 },
+            messages: [
+              { role: "system", content: systemPrompt },
+              { role: "user", content: userPrompt }
+            ]
+          })
+        });
+        if (!res.ok) throw new Error(`Ollama returned HTTP ${res.status}`);
+        const data = await res.json();
+        return extractSql(data.message?.content || "");
+      } else {
+        await webllmEngine.resetChat();
+        const chunks = await webllmEngine.chat.completions.create({
+          temperature: 0,
+          max_tokens: 128,
+          stream: true,
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userPrompt }
+          ]
+        });
+        let rawReply = "";
+        for await (const chunk of chunks) {
+          const delta = chunk.choices[0]?.delta?.content || "";
+          rawReply += delta;
+          sqlQueryBox.value = rawReply;
+          aiStatusText.textContent = `Generating SQL: ${rawReply.slice(0, 60)}...`;
+        }
+        return extractSql(rawReply);
+      }
+    }
+
+    function extractSql(raw) {
+      let cleaned = raw.trim();
+      const fenceMatch = cleaned.match(/```(?:sql)?\s*([\s\S]*?)```/i);
+      if (fenceMatch) {
+        cleaned = fenceMatch[1].trim();
+      }
+      const selectIdx = cleaned.search(/\b(SELECT|WITH)\b/i);
+      if (selectIdx > 0) {
+        cleaned = cleaned.slice(selectIdx).trim();
+      }
+      return cleaned;
+    }
+
+    askAiBtn.addEventListener("click", async () => {
+      const question = aiQuestionInput.value.trim();
+      if (!question) return;
+
+      askAiBtn.disabled = true;
+      hideError();
+      try {
+        let sql = "";
+        if (aiEngineMode.value === "builtin") {
+          sql = await translateQuestionToSql(question);
+        } else {
+          try {
+            const schemaText = await buildSchemaPromptForQuestion(question);
+            const systemPrompt = `You write DuckDB SQL queries. Output ONLY the SQL query, with no explanation.
+Rules:
+- Always prefix tables with data. (example: SELECT * FROM data.simple_bus_routes LIMIT 100;)
+- Wrap column names in double quotes like "Column Name".
+- Do NOT add a WHERE clause unless the user asks to filter by a specific value.
+- Always end with LIMIT 100.
+
+${schemaText}`;
+            sql = await generateSqlWithAi(systemPrompt, question);
+          } catch (llmErr) {
+            console.warn("External LLM failed, falling back to Built-In Smart SQL Translator:", llmErr);
+            aiStatusText.textContent = "WebGPU/LLM unavailable; using Built-in Smart SQL Translator...";
+            sql = await translateQuestionToSql(question);
+          }
+        }
+
+        sqlQueryBox.value = sql;
+        aiStatusText.textContent = `Running: ${sql}`;
+
+        try {
+          await executeQuery(sql, `AI Search: "${question}"`);
+          aiStatusText.textContent = `Completed (${sql})`;
+        } catch (dbErr) {
+          // Fallback to Built-In translator if external LLM produced invalid SQL
+          console.warn("Generated SQL failed, falling back to Built-In translator:", dbErr);
+          sql = await translateQuestionToSql(question);
+          sqlQueryBox.value = sql;
+          await executeQuery(sql, `AI Search: "${question}"`);
+          aiStatusText.textContent = `Completed (${sql})`;
+        }
+      } catch (err) {
+        showError(`AI query failed: ${err.message || err}`);
+      } finally {
+        askAiBtn.disabled = false;
+      }
+    });
+
+    function showError(msg) {
+      errorBanner.textContent = msg;
+      errorBanner.style.display = "block";
+    }
+
+    function hideError() {
+      errorBanner.textContent = "";
+      errorBanner.style.display = "none";
+    }
+
+    function escapeHtml(str) {
+      return String(str ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+
+    initDuckDB();
+  </script>
+</body>
+</html>
