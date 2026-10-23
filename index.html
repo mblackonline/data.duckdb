@@ -14,15 +14,19 @@
       --text: #1e293b;
       --muted: #64748b;
       --border: #e2e8f0;
-      --success: #16a34a;
+      --success: #15803d;
       --warning: #d97706;
-      --danger: #dc2626;
+      --danger: #b91c1c;
       --code-bg: #0f172a;
       --code-text: #e2e8f0;
     }
 
     * {
       box-sizing: border-box;
+    }
+
+    [hidden] {
+      display: none !important;
     }
 
     body {
@@ -150,7 +154,7 @@
     /* Preset Report Cards */
     .preset-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      grid-template-columns: repeat(auto-fill, minmax(min(260px, 100%), 1fr));
       gap: 0.85rem;
     }
 
@@ -213,7 +217,8 @@
       gap: 0.35rem;
     }
 
-    .form-group label {
+    .form-group label,
+    .field-label {
       font-size: 0.82rem;
       font-weight: 600;
       color: var(--muted);
@@ -234,11 +239,19 @@
       background: #ffffff;
     }
 
-    select:focus,
-    input:focus,
-    textarea:focus {
-      outline: 2px solid var(--accent);
-      border-color: transparent;
+    select:focus-visible,
+    input:focus-visible,
+    textarea:focus-visible,
+    button:focus-visible,
+    a:focus-visible,
+    summary:focus-visible,
+    [tabindex]:focus-visible {
+      outline: 3px solid var(--primary);
+      outline-offset: 3px;
+    }
+
+    .sql-details :focus-visible {
+      outline-color: #93c5fd;
     }
 
     .btn {
@@ -280,7 +293,7 @@
     }
 
     .btn-success:hover:not(:disabled) {
-      background: #15803d;
+      background: #166534;
     }
 
     /* AI Section */
@@ -361,7 +374,22 @@
       display: flex;
       flex-wrap: wrap;
       gap: 0.5rem;
-      align-items: center;
+      align-items: flex-end;
+      max-width: 100%;
+    }
+
+    .panel,
+    .results-card,
+    .form-group,
+    .results-actions > * {
+      min-width: 0;
+    }
+
+    .panel-subtitle,
+    .results-meta,
+    .error-banner,
+    .ai-setup-bar {
+      overflow-wrap: anywhere;
     }
 
     .sql-details {
@@ -381,12 +409,15 @@
 
     .sql-editor-row {
       display: flex;
+      flex-wrap: wrap;
       gap: 0.5rem;
       margin-top: 0.6rem;
       align-items: flex-start;
     }
 
     .sql-editor-row textarea {
+      flex: 1 1 24rem;
+      min-width: 0;
       background: #1e293b;
       color: #f8fafc;
       border: 1px solid #334155;
@@ -396,7 +427,6 @@
     }
 
     .error-banner {
-      display: none;
       background: #fef2f2;
       border: 1px solid #fecaca;
       color: var(--danger);
@@ -405,6 +435,12 @@
       margin-bottom: 0.85rem;
       font-size: 0.88rem;
       white-space: pre-wrap;
+    }
+
+    .error-banner:empty {
+      padding: 0;
+      border: 0;
+      margin: 0;
     }
 
     .table-container {
@@ -452,6 +488,19 @@
       color: var(--muted);
       font-size: 0.95rem;
     }
+
+    @media (max-width: 600px) {
+      header { padding: 1rem; }
+      main { padding: 0 0.75rem 2rem; }
+      .panel, .results-card { padding: 1rem; }
+      .results-actions { width: 100%; }
+      .results-actions > *, .btn, .tab-btn { max-width: 100%; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { transition: none !important; }
+      .preset-card:hover { transform: none; }
+    }
   </style>
 </head>
 <body>
@@ -462,26 +511,26 @@
     </div>
     <div class="status-badge">
       <span id="dbStatusDot" class="status-dot"></span>
-      <span id="dbStatusText">Connecting to CARTA DuckDB...</span>
+      <span id="dbStatusText" role="status" aria-live="polite" aria-atomic="true">Connecting to CARTA DuckDB...</span>
     </div>
   </header>
 
   <main>
-    <div class="tabs">
-      <button class="tab-btn active" data-tab="panel-presets">1. One-Click Reports</button>
-      <button class="tab-btn" data-tab="panel-builder">2. Visual Filter Builder</button>
-      <button class="tab-btn" data-tab="panel-ai">3. Ask in Plain English</button>
+    <div class="tabs" role="tablist" aria-label="Report tools">
+      <button id="tab-presets" class="tab-btn active" role="tab" aria-controls="panel-presets" aria-selected="true" tabindex="0" data-tab="panel-presets">1. One-Click Reports</button>
+      <button id="tab-builder" class="tab-btn" role="tab" aria-controls="panel-builder" aria-selected="false" tabindex="-1" data-tab="panel-builder">2. Visual Filter Builder</button>
+      <button id="tab-ai" class="tab-btn" role="tab" aria-controls="panel-ai" aria-selected="false" tabindex="-1" data-tab="panel-ai">3. Ask in Plain English</button>
     </div>
 
     <!-- TAB 1: ONE-CLICK PRESETS -->
-    <section id="panel-presets" class="panel active">
+    <section id="panel-presets" class="panel active" role="tabpanel" aria-labelledby="tab-presets" tabindex="0">
       <h2>One-Click Reports for Customer Service &amp; Operations</h2>
       <p class="panel-subtitle">Click a report to query the published data. Check its source timestamp before treating it as current.</p>
       <div id="presetGrid" class="preset-grid"></div>
     </section>
 
     <!-- TAB 2: VISUAL FILTER BUILDER -->
-    <section id="panel-builder" class="panel">
+    <section id="panel-builder" class="panel" role="tabpanel" aria-labelledby="tab-builder" tabindex="0" hidden>
       <h2>Visual Filter Builder</h2>
       <p class="panel-subtitle">Pick a dataset, choose a column to filter or sort by, and click Run Report.</p>
       <div class="form-grid">
@@ -542,7 +591,7 @@
     </section>
 
     <!-- TAB 3: ASK IN PLAIN ENGLISH (GROQ AI) -->
-    <section id="panel-ai" class="panel">
+    <section id="panel-ai" class="panel" role="tabpanel" aria-labelledby="tab-ai" tabindex="0" hidden>
       <h2>Ask a Question in Plain English</h2>
       <p class="panel-subtitle">
         Powered by <strong>Groq (OpenAI GPT-OSS 120B / 20B)</strong>.
@@ -560,7 +609,7 @@
           </select>
         </div>
         <div style="display: flex; align-items: flex-end; gap: 0.75rem; flex-wrap: wrap;">
-          <div class="form-group" style="flex: 1; min-width: 240px;">
+          <div class="form-group" style="flex: 1 1 240px; min-width: 0;">
             <label for="groqApiKeyInput">
               Groq API Key (Free at
               <a href="https://console.groq.com/keys" target="_blank" rel="noopener" style="color: var(--carta-blue);">
@@ -604,13 +653,14 @@
         <button class="chip" data-prompt="What is the total UPT ridership for Chattanooga by Mode in ntd_monthly_ridership_v1?">Total ridership by mode (SUM)</button>
       </div>
 
+      <label for="aiQuestionInput" class="field-label">Question about public CARTA data</label>
       <div style="display: flex; gap: 0.65rem; flex-wrap: wrap;">
         <input
           type="text"
           id="aiQuestionInput"
           aria-describedby="aiPrivacyWarning"
           placeholder="Ask any question (e.g., 'What is the average capacity of Bike Chattanooga stations?' or 'Show CARTA ridership in 2024')..."
-          style="flex: 1; min-width: 260px;"
+          style="flex: 1 1 260px; min-width: 0;"
         />
         <button id="askAiBtn" class="btn" disabled>Ask AI &amp; Run</button>
       </div>
@@ -618,21 +668,24 @@
         <strong>Use public CARTA data only.</strong> Do not enter confidential information, personal information,
         passwords, or API keys in your question.
       </p>
-      <div id="aiStatusText" style="margin-top: 0.6rem; font-size: 0.85rem; color: var(--muted);"></div>
+      <div id="aiStatusText" role="status" aria-live="polite" aria-atomic="true" style="margin-top: 0.6rem; font-size: 0.85rem; color: var(--muted);"></div>
     </section>
 
     <!-- RESULTS TABLE -->
     <section class="results-card">
       <div class="results-toolbar">
-        <div id="resultsMeta" class="results-meta">No report loaded yet</div>
+        <div id="resultsMeta" class="results-meta" role="status" aria-live="polite" aria-atomic="true">No report loaded yet</div>
         <div class="results-actions">
-          <input
-            type="text"
-            id="quickSearchInput"
-            disabled
-            placeholder="Quick filter loaded rows..."
-            style="width: 220px; padding: 0.45rem 0.65rem; font-size: 0.85rem;"
-          />
+          <div class="form-group" style="max-width: 100%;">
+            <label for="quickSearchInput">Quick filter loaded rows</label>
+            <input
+              type="text"
+              id="quickSearchInput"
+              disabled
+              placeholder="Quick filter loaded rows..."
+              style="width: 220px; max-width: 100%; padding: 0.45rem 0.65rem; font-size: 0.85rem;"
+            />
+          </div>
           <button id="exportCsvBtn" class="btn btn-success" aria-describedby="csvExportHelp" disabled>Download loaded rows (CSV)</button>
           <button id="stopReportBtn" class="btn btn-secondary" disabled>Stop report</button>
           <button id="reconnectBtn" class="btn" hidden>Reconnect</button>
@@ -648,16 +701,17 @@
 
       <details class="sql-details">
         <summary>View or Edit SQL Query</summary>
-        <p>Run one read-only query using CARTA datasets (data.*). External sources and administrative commands are not supported.</p>
+        <p id="sqlPolicyHelp">Run one read-only query using CARTA datasets (data.*). External sources and administrative commands are not supported.</p>
+        <label for="sqlQueryBox">Report SQL</label>
         <div class="sql-editor-row">
-          <textarea id="sqlQueryBox" spellcheck="false"></textarea>
+          <textarea id="sqlQueryBox" spellcheck="false" aria-describedby="sqlPolicyHelp"></textarea>
           <button id="runCustomSqlBtn" class="btn btn-secondary" disabled>Run SQL</button>
         </div>
       </details>
 
-      <div id="errorBanner" class="error-banner"></div>
+      <div id="errorBanner" class="error-banner" role="alert" aria-atomic="true"></div>
 
-      <div id="tableContainer" class="table-container">
+      <div id="tableContainer" class="table-container" role="region" aria-label="Report results" aria-describedby="resultsMeta" tabindex="0">
         <div class="empty-state">
           Select one of the <strong>One-Click Reports</strong> above to view CARTA data.
         </div>
@@ -944,12 +998,33 @@
     });
 
     // Setup Tabs
-    document.querySelectorAll(".tab-btn").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        document.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("active"));
-        document.querySelectorAll(".panel").forEach((p) => p.classList.remove("active"));
-        btn.classList.add("active");
-        document.getElementById(btn.dataset.tab).classList.add("active");
+    const reportTabs = Array.from(document.querySelectorAll('[role="tab"]'));
+
+    function activateReportTab(tab) {
+      for (const candidate of reportTabs) {
+        const selected = candidate === tab;
+        candidate.setAttribute("aria-selected", String(selected));
+        candidate.tabIndex = selected ? 0 : -1;
+        candidate.classList.toggle("active", selected);
+        const panel = document.getElementById(candidate.getAttribute("aria-controls"));
+        panel.hidden = !selected;
+        panel.classList.toggle("active", selected);
+      }
+    }
+
+    reportTabs.forEach((btn, index) => {
+      btn.addEventListener("click", () => activateReportTab(btn));
+      btn.addEventListener("focus", () => activateReportTab(btn));
+      btn.addEventListener("keydown", (event) => {
+        if (event.altKey || event.ctrlKey || event.metaKey) return;
+        let next;
+        if (event.key === "ArrowRight") next = (index + 1) % reportTabs.length;
+        else if (event.key === "ArrowLeft") next = (index + reportTabs.length - 1) % reportTabs.length;
+        else if (event.key === "Home") next = 0;
+        else if (event.key === "End") next = reportTabs.length - 1;
+        else return;
+        event.preventDefault();
+        reportTabs[next].focus();
       });
     });
 
@@ -1392,7 +1467,7 @@
       }
 
       const thead = `<thead><tr>${currentColumns
-        .map((c) => `<th>${escapeHtml(c)}</th>`)
+        .map((c) => `<th scope="col">${escapeHtml(c)}</th>`)
         .join("")}</tr></thead>`;
 
       const tbody = `<tbody>${rows
@@ -1404,7 +1479,7 @@
         )
         .join("")}</tbody>`;
 
-      tableContainer.innerHTML = `<table>${thead}${tbody}</table>`;
+      tableContainer.innerHTML = `<table aria-label="Loaded report rows">${thead}${tbody}</table>`;
     }
 
     // Quick client-side row search
@@ -1868,7 +1943,7 @@ ${schemaText}`;
         if (requestId !== reportRequestId) return;
         let { sql, usedModel } = generated;
         sqlQueryBox.value = sql;
-        aiStatusText.textContent = `Generated by ${usedModel}: ${sql}`;
+        aiStatusText.textContent = `SQL generated by ${usedModel}. Running report...`;
 
         try {
           await executeQuery(sql, title, null, null, requestId);
@@ -1880,12 +1955,15 @@ ${schemaText}`;
           const retry = await generateSqlWithGroq(apiKey, question, dbErr.message || String(dbErr), requestId);
           if (requestId !== reportRequestId) return;
           sql = retry.sql;
+          usedModel = retry.usedModel;
           sqlQueryBox.value = sql;
-          aiStatusText.textContent = `Generated by ${retry.usedModel}: ${sql}`;
+          aiStatusText.textContent = `SQL generated by ${retry.usedModel}. Running report...`;
           await executeQuery(sql, title, null, null, requestId);
         }
+        if (requestId === reportRequestId) aiStatusText.textContent = `Report ready. SQL generated by ${usedModel}.`;
       } catch (err) {
         if (requestId !== reportRequestId) return;
+        aiStatusText.textContent = "AI report could not be completed.";
         showReportError(title, err);
       } finally {
         if (activeAiRequestId === requestId) {
@@ -1898,12 +1976,10 @@ ${schemaText}`;
 
     function showError(msg) {
       errorBanner.textContent = msg;
-      errorBanner.style.display = "block";
     }
 
     function hideError() {
       errorBanner.textContent = "";
-      errorBanner.style.display = "none";
     }
 
     function escapeHtml(str) {
