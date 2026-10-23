@@ -641,6 +641,8 @@
     // URL to attach data.duckdb from GitHub Raw (avoids the S3 .wal 403 error)
     const REMOTE_DUCKDB_URL = "https://raw.githubusercontent.com/gocarta/data.duckdb/main/data.duckdb";
     const GROQ_MODELS = Object.freeze(["openai/gpt-oss-120b", "openai/gpt-oss-20b"]);
+    // FTA agency identifier, verified against the NTD ID column in the public dataset.
+    const CARTA_NTD_ID = "40001";
 
     // Friendly descriptions for CARTA datasets
     const DATASET_INFO = {
@@ -757,8 +759,8 @@
       {
         title: "CARTA Monthly Ridership (NTD)",
         tag: "Management",
-        desc: "View CARTA / Chattanooga monthly ridership figures reported to the NTD.",
-        sql: "SELECT * FROM data.ntd_monthly_ridership_v1 WHERE \"Agency\" ILIKE '%Chattanooga%' OR \"UZA Name\" ILIKE '%Chattanooga%' ORDER BY \"Date\" DESC LIMIT 200;"
+        desc: "View CARTA monthly ridership figures reported to the NTD.",
+        sql: `SELECT * FROM data.ntd_monthly_ridership_v1 WHERE "NTD ID" = '${CARTA_NTD_ID}' ORDER BY "Date" DESC LIMIT 200;`
       },
       {
         title: "Bike Chattanooga Stations",
@@ -1345,7 +1347,8 @@ Rules:
 1. Always prefix table names with data. (for example: data.simple_bus_routes).
 2. Always wrap column names in double quotes (for example: "Legacy NTD ID", "UZA Name", "UPT").
 3. In data.ntd_monthly_ridership_v1 (national NTD dataset):
-   - Filter for CARTA / Chattanooga / Hamilton County using: WHERE ("Agency" ILIKE '%Chattanooga%' OR "UZA Name" ILIKE '%Chattanooga%')
+   - CARTA's "NTD ID" is '${CARTA_NTD_ID}'. For CARTA questions, use WHERE "NTD ID" = '${CARTA_NTD_ID}'. Its separate "Legacy NTD ID" is '4001'; do not confuse these columns.
+   - Default to CARTA only. Omit or change this agency filter only when the user explicitly requests another agency or a regional/national comparison. Do not identify CARTA by "Agency" text or "UZA Name", which describe names or geography rather than the exact agency identifier.
    - The "Mode" column uses 2-letter NTD codes: 'MB' (Motor Bus), 'DR' (Demand Response / Paratransit), 'IP' (Inclined Plane). The "3 Mode" column uses 'Bus' or 'Demand Response'.
 4. Include LIMIT 100 unless the query is an aggregation (COUNT, SUM, AVG, GROUP BY) or the user requests a specific limit.
 5. STRICT GUARDRAIL: Every query MUST include a FROM data.<table_name> clause referencing one of the tables in Schema. Never output a SELECT with only literal strings/numbers to answer general knowledge, coding, or non-CARTA questions. If the user's request is not about querying the CARTA tables listed in Schema, output the single word: UNSUPPORTED_QUERY
