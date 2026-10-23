@@ -548,23 +548,33 @@
         Only table and column names are sent to Groq; your SQL runs locally in DuckDB.
       </p>
 
-      <div class="ai-setup-bar">
-        <div class="form-group" style="flex: 1; min-width: 260px;">
-          <label for="groqApiKeyInput">
-            Groq API Key (Free at
-            <a href="https://console.groq.com/keys" target="_blank" rel="noopener" style="color: var(--carta-blue);">
-              console.groq.com/keys
-            </a>)
-          </label>
-          <input
-            type="password"
-            id="groqApiKeyInput"
-            placeholder="gsk_..."
-            autocomplete="off"
-          />
+      <div class="ai-setup-bar" style="flex-direction: column; align-items: stretch;">
+        <div class="form-group" style="max-width: 420px;">
+          <label for="groqModelSelect">AI Model (Auto-switches if daily limit is reached)</label>
+          <select id="groqModelSelect">
+            <option value="openai/gpt-oss-120b" selected>OpenAI GPT-OSS 120B (Default, Most Accurate)</option>
+            <option value="openai/gpt-oss-20b">OpenAI GPT-OSS 20B (Fastest)</option>
+            <option value="qwen/qwen3.8-27b">Qwen 3.8 27B (Backup)</option>
+          </select>
         </div>
-        <button id="saveGroqKeyBtn" class="btn btn-secondary">Save Key</button>
-        <span id="groqKeyStatus" style="font-size: 0.85rem; color: var(--muted);"></span>
+        <div style="display: flex; align-items: flex-end; gap: 0.75rem; flex-wrap: wrap;">
+          <div class="form-group" style="flex: 1; min-width: 240px;">
+            <label for="groqApiKeyInput">
+              Groq API Key (Free at
+              <a href="https://console.groq.com/keys" target="_blank" rel="noopener" style="color: var(--carta-blue);">
+                console.groq.com/keys
+              </a>)
+            </label>
+            <input
+              type="password"
+              id="groqApiKeyInput"
+              placeholder="gsk_..."
+              autocomplete="off"
+            />
+          </div>
+          <button id="saveGroqKeyBtn" class="btn btn-secondary">Save Key</button>
+          <span id="groqKeyStatus" style="font-size: 0.85rem; color: var(--muted); padding-bottom: 0.4rem;"></span>
+        </div>
       </div>
 
       <div class="chip-row">
@@ -783,6 +793,7 @@
 
     // Plain-English Search DOM elements
     const groqApiKeyInput = document.getElementById("groqApiKeyInput");
+    const groqModelSelect = document.getElementById("groqModelSelect");
     const saveGroqKeyBtn = document.getElementById("saveGroqKeyBtn");
     const groqKeyStatus = document.getElementById("groqKeyStatus");
     const aiStatusText = document.getElementById("aiStatusText");
@@ -791,11 +802,10 @@
 
     // Load saved Groq API key from localStorage
     const GROQ_STORAGE_KEY = "carta_groq_api_key";
-    let preferredGroqModel = null;
     const savedGroqKey = localStorage.getItem(GROQ_STORAGE_KEY) || "";
     if (savedGroqKey) {
       groqApiKeyInput.value = savedGroqKey;
-      groqKeyStatus.textContent = "Groq API key saved in browser (GPT-OSS 120B ready).";
+      groqKeyStatus.textContent = "Groq API key saved in browser.";
     } else {
       groqKeyStatus.textContent = "Enter a free Groq API key for full AI SQL generation.";
     }
@@ -1428,9 +1438,13 @@ ${schemaText}`;
         ? `Question: ${question}\nPrevious SQL failed in DuckDB with error: ${retryError}\nFix the DuckDB SQL query using only the exact column names listed in Schema.`
         : question;
 
-      const candidates = preferredGroqModel
-        ? [preferredGroqModel, "openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.8-27b"]
-        : ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.8-27b"];
+      const selectedModel = groqModelSelect.value || "openai/gpt-oss-120b";
+      const candidates = [
+        selectedModel,
+        "openai/gpt-oss-120b",
+        "openai/gpt-oss-20b",
+        "qwen/qwen3.8-27b"
+      ];
       const uniqueCandidates = [...new Set(candidates)];
 
       let lastRes = null;
@@ -1442,7 +1456,9 @@ ${schemaText}`;
         const res = await callGroqChat(apiKey, usedModel, systemPrompt, userPrompt);
         lastRes = res;
         if (res.ok) {
-          preferredGroqModel = usedModel;
+          if (usedModel !== selectedModel) {
+            groqModelSelect.value = usedModel;
+          }
           const data = await res.json();
           const sql = extractSql(data.choices?.[0]?.message?.content || "");
           return { sql, usedModel };
@@ -1460,7 +1476,6 @@ ${schemaText}`;
         const res = await callGroqChat(apiKey, usedModel, systemPrompt, userPrompt);
         lastRes = res;
         if (res.ok) {
-          preferredGroqModel = usedModel;
           const data = await res.json();
           const sql = extractSql(data.choices?.[0]?.message?.content || "");
           return { sql, usedModel };
