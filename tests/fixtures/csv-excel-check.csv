@@ -1,0 +1,18 @@
+﻿Case,Text,Identifier,Longitude,Total,"	=1+2"
+Ordinary text,Market Street,00123,-85.3097,1282571,Protected header
+Unicode,"Café, São Paulo, Chattanooga 😀",00004,-85.3097,1282571,Protected header
+Quotes and commas,"He said ""CARTA"", then left",1E10,-85.3097,1282571,Protected header
+Carriage return,"NorthSouth",00007,-85.3097,1282571,Protected header
+Line feed,"North
+South",00008,-85.3097,1282571,Protected header
+CRLF,"North
+South",00009,-85.3097,1282571,Protected header
+Equals,"	=1+2",00010,-85.3097,1282571,Protected header
+Plus,"	+SUM(1,2)",00011,-85.3097,1282571,Protected header
+Minus expression,"	-1+2",00012,-85.3097,1282571,Protected header
+At sign,"	@SUM(A1:A2)",00013,-85.3097,1282571,Protected header
+Leading spaces,"	  =1+2",00014,-85.3097,1282571,Protected header
+Leading tab,"		=1+2",00015,-85.3097,1282571,Protected header
+Full-width equals,"	＝1+2",00016,-85.3097,1282571,Protected header
+Long ID,Keep this ID as Text,12345678901234567890,-85.3097,1282571,Protected header
+Separator text,"Market"",=1+2; next stop",00018,-85.3097,1282571,Protected header

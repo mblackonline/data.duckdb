@@ -633,7 +633,7 @@
             placeholder="Quick filter loaded rows..."
             style="width: 220px; padding: 0.45rem 0.65rem; font-size: 0.85rem;"
           />
-          <button id="exportCsvBtn" class="btn btn-success" disabled>Download loaded rows (CSV)</button>
+          <button id="exportCsvBtn" class="btn btn-success" aria-describedby="csvExportHelp" disabled>Download loaded rows (CSV)</button>
           <button id="stopReportBtn" class="btn btn-secondary" disabled>Stop report</button>
           <button id="reconnectBtn" class="btn" hidden>Reconnect</button>
         </div>
@@ -641,6 +641,10 @@
 
       <div id="resultsFreshness" class="panel-subtitle" role="status" aria-live="polite"></div>
       <div id="resultsScope" class="panel-subtitle" role="status" aria-live="polite"></div>
+      <p id="csvExportHelp" class="panel-subtitle">
+        CSV exports add a protective tab before formula-like text for Excel. Plain numbers are unchanged.
+        Import identifier columns as Text in Excel to preserve leading zeros and long IDs.
+      </p>
 
       <details class="sql-details">
         <summary>View or Edit SQL Query</summary>
@@ -1424,21 +1428,29 @@
     exportCsvBtn.addEventListener("click", () => {
       if (!currentReport || exportCsvBtn.disabled || !currentRows.length) return;
       const csvLines = [
-        currentColumns.map(csvEscape).join(","),
+        currentColumns.map((col) => csvEscape(col, true)).join(","),
         ...currentRows.map((row) => currentColumns.map((col) => csvEscape(row[col])).join(","))
       ];
-      const blob = new Blob([csvLines.join("\r\n")], { type: "text/csv;charset=utf-8;" });
+      // Excel recognizes UTF-8 reliably when the file starts with its byte-order mark.
+      const blob = new Blob(["\uFEFF", csvLines.join("\r\n")], { type: "text/csv;charset=utf-8;" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `carta_report_${new Date().toISOString().slice(0, 10)}.csv`;
+      a.download = `carta_report_${new Date().toISOString().slice(0, 10)}${currentReport.truncated ? "_partial" : ""}.csv`;
       a.click();
       URL.revokeObjectURL(url);
     });
 
-    function csvEscape(val) {
-      const str = String(val ?? "");
-      if (str.includes(",") || str.includes('"') || str.includes("\n")) {
+    function csvEscape(val, isHeader = false) {
+      let str = String(val ?? "");
+      // A complete decimal/scientific literal is safe, including negative coordinates and totals.
+      // Never exempt headers or arithmetic expressions based on a numeric-looking prefix.
+      const plainNumber = !isHeader && /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(str);
+      const formulaLike = /^[\s\u0000-\u001F\u007F\u200B-\u200F\u202A-\u202E\u2060-\u206F]*[=+@\-\uFF1D\uFF0B\uFF0D\uFF20]/u.test(str) || /^[\t\r\n]/.test(str);
+      const protect = !plainNumber && formulaLike;
+      // A quoted tab prefix protects formula-like cells in Excel; it remains part of CSV data.
+      if (protect) str = `\t${str}`;
+      if (protect || /[",\r\n]/.test(str)) {
         return `"${str.replace(/"/g, '""')}"`;
       }
       return str;
