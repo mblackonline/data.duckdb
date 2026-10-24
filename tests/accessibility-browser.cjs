@@ -62,7 +62,7 @@ async function main() {
   });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
-  let browser;
+  let browser, releaseAiResponse;
   try {
     browser = await chromium.launch({ executablePath, headless: true });
     console.log("Browser:", await browser.version());
@@ -71,10 +71,18 @@ async function main() {
     page.setDefaultTimeout(10000);
     const errors = [];
     page.on("pageerror", error => errors.push(error.message));
-    await context.route("**/*", route => {
+    let aiResponseGate = null, aiRequests = 0;
+    await context.route("**/*", async route => {
       const url = route.request().url();
       if (url.startsWith(origin + "/")) return route.continue();
       if (url.startsWith("https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@")) return route.fulfill({ contentType: "text/javascript", body: fixtureModule });
+      if (url === "https://api.groq.com/openai/v1/chat/completions") {
+        const headers = { "Access-Control-Allow-Origin": origin, "Access-Control-Allow-Headers": "authorization,content-type", "Access-Control-Allow-Methods": "POST,OPTIONS" };
+        if (route.request().method() === "OPTIONS") return route.fulfill({ status: 204, headers });
+        aiRequests++;
+        if (aiResponseGate) await aiResponseGate;
+        return route.fulfill({ contentType: "application/json", headers, body: JSON.stringify({ choices: [{ message: { content: "SELECT * FROM data.simple_bus_routes LIMIT 100" } }] }) });
+      }
       return route.abort();
     });
     await page.goto(origin);
@@ -118,7 +126,7 @@ async function main() {
     await page.keyboard.press("Shift+Tab"); await page.keyboard.press("Shift+Tab");
     await selected("tab-builder");
     await page.keyboard.press("End"); await selected("tab-ai");
-    assert(await page.getByRole("textbox", { name: "Question about public CARTA data", exact: true }).isVisible());
+    assert(await page.getByRole("textbox", { name: "Your question", exact: true }).isVisible());
     assert(!await page.locator("#reconnectBtn").isVisible());
     await audit("AI tab");
     await page.keyboard.press("Home"); await selected("tab-presets");
@@ -140,7 +148,7 @@ async function main() {
     await page.getByText(/40 displayed \/ 40 loaded rows/).waitFor();
     assert(await routes.evaluate(element => element === document.activeElement), "Report completion must preserve focus");
     assert.equal(await page.locator("th[scope=col]").count(), 3);
-    const quickFilter = page.getByRole("textbox", { name: "Quick filter loaded rows", exact: true });
+    const quickFilter = page.getByRole("textbox", { name: "Search these results", exact: true });
     await tabTo(quickFilter);
     await page.keyboard.type("Market");
     await page.getByText(/1 displayed \/ 40 loaded rows/).waitFor();
@@ -149,7 +157,7 @@ async function main() {
     await page.keyboard.press("Enter"); await page.keyboard.press("Tab");
     assert(await page.getByRole("textbox", { name: "Report SQL", exact: true }).evaluate(element => element === document.activeElement));
     const resultTree = await page.locator(".results-card").ariaSnapshot();
-    assert.match(resultTree, /textbox "Quick filter loaded rows"/);
+    assert.match(resultTree, /textbox "Search these results"/);
     assert.match(resultTree, /textbox "Report SQL"/);
     assert.match(resultTree, /region "Report results"/);
     assert.match(resultTree, /table "Loaded report rows"/);
@@ -185,10 +193,78 @@ async function main() {
       await audit(`${width}px layout`);
     }
     await page.screenshot({ path: path.join(prefix, "accessibility-320px.png"), fullPage: true });
-    assert.deepEqual(errors, []);
     console.log("PASS: no detected axe WCAG A/AA violations in tested states; page reflows at 640px and 320px");
+
+    await page.setViewportSize({ width: 1280, height: 1000 });
+    const settings = page.locator("#aiSettings");
+    const question = page.getByRole("textbox", { name: "Your question", exact: true });
+    const create = page.getByRole("button", { name: "Create report", exact: true });
+    assert.equal(await settings.evaluate(element => element.open), true);
+    assert.equal(await page.locator("#aiPrivacyDetails").evaluate(element => element.open), false);
+    assert.equal(await page.locator("#panel-ai .chip").count(), 3);
+    assert((await question.boundingBox()).y < (await settings.boundingBox()).y);
+    await page.getByRole("button", { name: "Ridership by mode", exact: true }).click();
+    assert((await question.inputValue()).includes("2024"));
+    assert(await question.evaluate(element => element === document.activeElement));
+    assert.equal(aiRequests, 0, "Examples must not submit requests");
+    await create.click();
+    assert.equal(await focusedId(), "groqApiKeyInput");
+    assert.equal(aiRequests, 0);
+    assert.equal(await settings.evaluate(element => element.open), true);
+    await page.getByLabel("Groq API key", { exact: true }).fill("gsk_browser_fixture_only");
+    await page.getByRole("button", { name: "Remember on this device", exact: true }).click();
+    await page.reload();
+    await page.getByText("Connected (1 CARTA datasets ready)", { exact: true }).waitFor();
+    await page.locator("#tab-ai").click();
+    assert.equal(await settings.evaluate(element => element.open), false);
+    assert.equal(await page.locator("#aiKeySummary").textContent(), "Key entered");
+    assert(!await page.getByLabel("Groq API key", { exact: true }).isVisible());
+    await page.locator("#aiSettings > summary").focus();
+    await page.keyboard.press("Enter");
+    assert(await page.getByLabel("Groq API key", { exact: true }).isVisible());
+    await page.keyboard.press("Enter");
+    assert.equal(await settings.evaluate(element => element.open), false);
+    await page.locator("#aiPrivacyDetails > summary").focus();
+    await page.keyboard.press("Enter");
+    assert(await page.getByText(/Your question, selected table schemas/).isVisible());
+    await page.keyboard.press("Enter");
+    assert(await page.locator("#aiPrivacyWarning").isVisible());
+    await question.fill("List CARTA routes");
+    await page.keyboard.press("Shift+Enter");
+    assert((await question.inputValue()).includes("\n"));
+    await question.dispatchEvent("keydown", { key: "Enter", isComposing: true });
+    assert.equal(aiRequests, 0, "Newlines and IME composition must not submit requests");
+    await page.evaluate(() => { globalThis.fixtureHold = true; globalThis.fixtureFinish = null; });
+    aiResponseGate = new Promise(resolve => { releaseAiResponse = resolve; });
+    const requestStarted = page.waitForRequest("https://api.groq.com/openai/v1/chat/completions");
+    await page.keyboard.press("Enter");
+    await requestStarted;
+    assert.equal(await page.locator("#aiStatusText").textContent(), "Preparing report...");
+    releaseAiResponse();
+    await page.getByText("Loading results...", { exact: true }).waitFor();
+    await page.waitForFunction(() => typeof globalThis.fixtureFinish === "function");
+    await page.evaluate(() => { globalThis.fixtureHold = false; globalThis.fixtureFinish(); });
+    await page.getByText("Report ready.", { exact: true }).waitFor();
+    assert.equal(aiRequests, 1);
+    assert.equal(await settings.evaluate(element => element.open), false);
+    await audit("Simplified AI panel, remembered key and ready report");
+    await page.locator("#panel-ai").screenshot({ path: path.join(prefix, "ai-screen-desktop.png") });
+    await page.locator("#aiSettings > summary").click();
+    await page.getByRole("button", { name: "Forget key", exact: true }).click();
+    assert.equal(await settings.evaluate(element => element.open), true);
+    assert.equal(await page.locator("#aiKeySummary").textContent(), "Key needed");
+    assert.equal(await page.getByLabel("Groq API key", { exact: true }).inputValue(), "");
+    await page.locator("#panel-ai").screenshot({ path: path.join(prefix, "ai-screen-setup.png") });
+    await page.setViewportSize({ width: 320, height: 1000 });
+    assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
+    await audit("Simplified AI panel, key setup at 320px");
+    await page.locator("#aiSettings > summary").click();
+    await page.locator("#panel-ai").screenshot({ path: path.join(prefix, "ai-screen-mobile.png") });
+    assert.deepEqual(errors, []);
+    console.log("PASS: question-first AI panel, disclosure keyboard access, remembered/missing key states, reviewed examples, textarea shortcuts and progress");
     console.log("Manual screen-reader speech and browser zoom checks remain separate verification.");
   } finally {
+    if (releaseAiResponse) releaseAiResponse();
     if (browser) await browser.close();
     await new Promise(resolve => server.close(resolve));
   }

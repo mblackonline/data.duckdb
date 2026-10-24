@@ -49,6 +49,7 @@ test("remembering is explicit and survives reload; editing requires consent agai
   const next = harness({ storage });
   assert.equal(next.ui.groqApiKeyInput.value, "gsk_remembered");
   assert.match(next.ui.groqKeyStatus.textContent, /Remembered key loaded/);
+  assert.equal(next.ui.aiSettings.open, false);
   typeKey(next, "gsk_replacement");
   assert.equal(storage.getItem(KEY), null);
   assert.match(next.ui.groqKeyStatus.textContent, /this tab only/);
@@ -64,6 +65,8 @@ test("Forget clears the field and saved key while preserving unrelated browser s
   assert.equal(storage.getItem(KEY), null);
   assert.equal(storage.entries.get("unrelated-setting"), "keep");
   assert.match(h.ui.groqKeyStatus.textContent, /Key forgotten/);
+  assert.equal(h.ui.aiSettings.open, true);
+  assert.equal(h.ui.aiKeySummary.textContent, "Key needed");
   assert.notEqual(harness({ storage }).ui.groqApiKeyInput.value, "gsk_forget");
 });
 
@@ -105,6 +108,8 @@ for (const blocked of ["getter", "read"]) {
       : { getItem() { throw Error("mock read denied"); }, setItem() { throw Error("mock write denied"); }, removeItem() { throw Error("mock clear denied"); } };
     const h = harness({ storage });
     assert.match(h.ui.groqKeyStatus.textContent, /Browser storage is unavailable/);
+    assert.equal(h.ui.aiSettings.open, true);
+    assert.equal(h.ui.aiKeySummary.textContent, "Review key storage");
     typeKey(h, "gsk_no_storage");
     const report = h.run("public preset or builder report");
     await new Promise(setImmediate);

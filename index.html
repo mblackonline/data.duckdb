@@ -297,16 +297,81 @@
     }
 
     /* AI Section */
-    .ai-setup-bar {
+    .ai-workspace {
+      max-width: 60rem;
+      margin: 0 auto;
+    }
+
+    .ai-workspace h2 { font-size: 1.35rem; }
+
+    .ai-question {
+      min-height: 108px;
+      margin-top: 0.35rem;
+      padding: 0.85rem 1rem;
+      font-size: 1rem;
+      line-height: 1.5;
+      resize: vertical;
+    }
+
+    .ai-input-hint,
+    .ai-warning,
+    .ai-detail-copy {
+      color: var(--muted);
+      font-size: 0.85rem;
+      line-height: 1.5;
+    }
+
+    .ai-input-hint { margin: 0.25rem 0 0.75rem; font-size: 0.78rem; }
+
+    .ai-actions {
       display: flex;
       flex-wrap: wrap;
-      gap: 0.75rem;
       align-items: center;
+      justify-content: space-between;
+      gap: 0.75rem 1.25rem;
+    }
+
+    .ai-warning { flex: 1 1 30rem; margin: 0; }
+    .ai-actions .btn { padding: 0.75rem 1.25rem; }
+
+    .ai-details {
+      border-top: 1px solid var(--border);
+      padding: 0.8rem 0;
+      overflow-wrap: anywhere;
+    }
+
+    .ai-details summary {
+      cursor: pointer;
+      color: var(--text);
+      font-size: 0.9rem;
+      font-weight: 600;
+    }
+
+    .ai-key-summary { margin-left: 0.65rem; color: var(--muted); font-size: 0.8rem; font-weight: 400; }
+
+    .ai-settings-content {
       background: #f8fafc;
       border: 1px solid var(--border);
-      padding: 0.85rem 1rem;
+      padding: 1rem;
       border-radius: 8px;
-      margin-bottom: 1rem;
+      margin-top: 0.8rem;
+    }
+
+    .ai-settings-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+      gap: 1.25rem;
+    }
+
+    .ai-key-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.65rem; }
+    .ai-detail-copy p { margin: 0.65rem 0 0; }
+    .ai-detail-copy a { color: var(--primary); }
+    #groqKeyStatus { margin: 0.65rem 0 0; }
+    #aiStatusText { color: var(--primary); font-weight: 600; }
+    #aiStatusText:not(:empty) { margin-top: 1rem; }
+
+    @media (max-width: 700px) {
+      .ai-settings-grid { grid-template-columns: minmax(0, 1fr); }
     }
 
     .progress-bar-wrap {
@@ -388,7 +453,7 @@
     .panel-subtitle,
     .results-meta,
     .error-banner,
-    .ai-setup-bar {
+    .ai-details {
       overflow-wrap: anywhere;
     }
 
@@ -592,83 +657,75 @@
 
     <!-- TAB 3: ASK IN PLAIN ENGLISH (GROQ AI) -->
     <section id="panel-ai" class="panel" role="tabpanel" aria-labelledby="tab-ai" tabindex="0" hidden>
-      <h2>Ask a Question in Plain English</h2>
-      <p class="panel-subtitle">
-        Powered by <strong>Groq (OpenAI GPT-OSS 120B / 20B)</strong>.
-        Your question, selected table schemas (table and column names and types), sample values from public datasets,
-        and other available table names are sent to Groq. If SQL fails, a retry also sends the DuckDB error,
-        which may include SQL or data values. Generated SQL runs in your browser using DuckDB.
-      </p>
+      <div class="ai-workspace">
+        <h2>Ask CARTA data</h2>
+        <p class="panel-subtitle">Describe the report you need.</p>
 
-      <div class="ai-setup-bar" style="flex-direction: column; align-items: stretch;">
-        <div class="form-group" style="max-width: 420px;">
-          <label for="groqModelSelect">AI Model (may switch after rate limits or certain API errors)</label>
-          <select id="groqModelSelect">
-            <option value="openai/gpt-oss-120b" selected>OpenAI GPT-OSS 120B (Default, Most Accurate)</option>
-            <option value="openai/gpt-oss-20b">OpenAI GPT-OSS 20B (Fastest)</option>
-          </select>
+        <label for="aiQuestionInput" class="field-label">Your question</label>
+        <textarea id="aiQuestionInput" class="ai-question" rows="3"
+          aria-describedby="aiQuestionHelp aiPrivacyWarning"
+          placeholder="For example, show CARTA ridership by mode for 2024."></textarea>
+        <p id="aiQuestionHelp" class="ai-input-hint">Enter to create a report. Shift+Enter adds a new line.</p>
+        <div class="ai-actions">
+          <p id="aiPrivacyWarning" class="ai-warning">
+            Questions and public dataset samples are sent to Groq. Do not enter confidential information,
+            personal information, passwords, or API keys.
+          </p>
+          <button id="askAiBtn" class="btn" disabled>Create report</button>
         </div>
-        <div style="display: flex; align-items: flex-end; gap: 0.75rem; flex-wrap: wrap;">
-          <div class="form-group" style="flex: 1 1 240px; min-width: 0;">
-            <label for="groqApiKeyInput">
-              Groq API Key (Free at
-              <a href="https://console.groq.com/keys" target="_blank" rel="noopener" style="color: var(--carta-blue);">
-                console.groq.com/keys
-              </a>)
-            </label>
-            <input
-              type="password"
-              id="groqApiKeyInput"
-              placeholder="gsk_..."
-              autocomplete="off"
-              aria-describedby="groqKeyStorageHelp"
-            />
+        <div id="aiStatusText" role="status" aria-live="polite" aria-atomic="true"></div>
+
+        <div class="chip-row" style="margin: 1.1rem 0 1.25rem;">
+          <span class="ai-detail-copy" style="align-self: center;">Try an example:</span>
+          <button class="chip" data-prompt="Show CARTA total UPT ridership by Mode for calendar year 2024 from ntd_monthly_ridership_v1.">Ridership by mode</button>
+          <button class="chip" data-prompt="Show CARTA monthly total UPT ridership for calendar year 2024, summed across modes and ordered by Date, from ntd_monthly_ridership_v1.">Monthly ridership</button>
+          <button class="chip" data-prompt="Show the top 20 Bike Chattanooga stations ordered by capacity.">Bike station capacity</button>
+        </div>
+
+        <details id="aiSettings" class="ai-details" open>
+          <summary>AI settings <span id="aiKeySummary" class="ai-key-summary">Key needed</span></summary>
+          <div class="ai-settings-content ai-detail-copy">
+            <div class="ai-settings-grid">
+              <div class="form-group">
+                <label for="groqApiKeyInput">Groq API key</label>
+                <input type="password" id="groqApiKeyInput" placeholder="gsk_..." autocomplete="off" aria-describedby="groqKeyStorageHelp" />
+                <a href="https://console.groq.com/keys" target="_blank" rel="noopener">Get a Groq API key</a>
+                <div class="ai-key-actions">
+                  <button id="saveGroqKeyBtn" type="button" class="btn btn-secondary">Remember on this device</button>
+                  <button id="forgetGroqKeyBtn" type="button" class="btn btn-secondary">Forget key</button>
+                </div>
+                <p id="groqKeyStatus" role="status" aria-atomic="true"></p>
+              </div>
+              <div class="form-group">
+                <label for="groqModelSelect">AI model</label>
+                <select id="groqModelSelect" aria-describedby="groqModelHelp">
+                  <option value="openai/gpt-oss-120b" selected>OpenAI GPT-OSS 120B (default)</option>
+                  <option value="openai/gpt-oss-20b">OpenAI GPT-OSS 20B</option>
+                </select>
+                <p id="groqModelHelp">The other approved model may be tried after a rate limit or certain API errors.</p>
+              </div>
+            </div>
+            <p id="groqKeyStorageHelp">
+              Default: this tab only, cleared on reload or close. Choose Remember on this device to save your key
+              across visits. Avoid remembering keys on shared computers. Forget key removes this app's saved copy;
+              it does not revoke the key at Groq or withdraw requests already sent.
+            </p>
           </div>
-          <button id="saveGroqKeyBtn" type="button" class="btn btn-secondary">Remember on this device</button>
-          <button id="forgetGroqKeyBtn" type="button" class="btn btn-secondary">Forget key</button>
-          <span id="groqKeyStatus" role="status" style="font-size: 0.85rem; color: var(--muted); padding-bottom: 0.4rem;"></span>
-        </div>
-        <p id="groqKeyStorageHelp" style="margin: 0.5rem 0 0; font-size: 0.8rem; color: var(--muted);">
-          Default: this tab only, cleared on reload or close. Choose Remember on this device to save your key
-          across visits. Avoid remembering keys on shared computers. Forget key removes this app's saved copy;
-          it does not revoke the key at Groq or withdraw requests already sent.
-        </p>
-        <div style="margin-top: 0.5rem; font-size: 0.8rem; color: var(--muted); line-height: 1.4;">
-          <strong>Public &amp; Partner Notice:</strong> Anyone can use this AI tool by getting a free API key at
-          <a href="https://console.groq.com/keys" target="_blank" rel="noopener" style="color: var(--carta-blue);">console.groq.com/keys</a>.
-          Your key stays in this tab unless you choose to remember it, and is sent directly to Groq for authentication.
-          This application does not record keys or questions in application logs.
-          Groq handles requests under its
-          <a href="https://console.groq.com/docs/your-data" target="_blank" rel="noopener" style="color: var(--carta-blue);">data policies</a>
-          and your Groq organization's retention settings.
-        </div>
-      </div>
+        </details>
 
-      <div class="chip-row">
-        <span style="font-size: 0.8rem; color: var(--muted); align-self: center;">Try an example:</span>
-        <button class="chip" data-prompt="Show all bus routes from simple_bus_routes">List all bus routes</button>
-        <button class="chip" data-prompt="Show the top 20 Bike Chattanooga stations ordered by capacity">Bike stations by capacity</button>
-        <button class="chip" data-prompt="Show bus stops with Market in the name">Bus stops on Market</button>
-        <button class="chip" data-prompt="Show CARTA monthly ridership by Date and Mode from ntd_monthly_ridership_v1">CARTA monthly ridership</button>
-        <button class="chip" data-prompt="What is the total UPT ridership for Chattanooga by Mode in ntd_monthly_ridership_v1?">Total ridership by mode (SUM)</button>
+        <details class="ai-details" id="aiPrivacyDetails">
+          <summary>What gets sent to Groq?</summary>
+          <div class="ai-detail-copy">
+            <p>Your question, selected table schemas (table and column names and types), sample values from public
+              datasets, and other available table names are sent to Groq. If SQL fails, a retry also sends the DuckDB
+              error, which may include SQL or data values. Generated SQL runs in your browser using DuckDB.</p>
+            <p>Your API key is sent directly to Groq for authentication. This application does not record keys or
+              questions in application logs. Groq handles requests under its
+              <a href="https://console.groq.com/docs/your-data" target="_blank" rel="noopener">data policies</a>
+              and your Groq organization's retention settings.</p>
+          </div>
+        </details>
       </div>
-
-      <label for="aiQuestionInput" class="field-label">Question about public CARTA data</label>
-      <div style="display: flex; gap: 0.65rem; flex-wrap: wrap;">
-        <input
-          type="text"
-          id="aiQuestionInput"
-          aria-describedby="aiPrivacyWarning"
-          placeholder="Ask any question (e.g., 'What is the average capacity of Bike Chattanooga stations?' or 'Show CARTA ridership in 2024')..."
-          style="flex: 1 1 260px; min-width: 0;"
-        />
-        <button id="askAiBtn" class="btn" disabled>Ask AI &amp; Run</button>
-      </div>
-      <p id="aiPrivacyWarning" style="margin-top: 0.6rem; font-size: 0.85rem;">
-        <strong>Use public CARTA data only.</strong> Do not enter confidential information, personal information,
-        passwords, or API keys in your question.
-      </p>
-      <div id="aiStatusText" role="status" aria-live="polite" aria-atomic="true" style="margin-top: 0.6rem; font-size: 0.85rem; color: var(--muted);"></div>
     </section>
 
     <!-- RESULTS TABLE -->
@@ -677,12 +734,12 @@
         <div id="resultsMeta" class="results-meta" role="status" aria-live="polite" aria-atomic="true">No report loaded yet</div>
         <div class="results-actions">
           <div class="form-group" style="max-width: 100%;">
-            <label for="quickSearchInput">Quick filter loaded rows</label>
+            <label for="quickSearchInput">Search these results</label>
             <input
               type="text"
               id="quickSearchInput"
               disabled
-              placeholder="Quick filter loaded rows..."
+              placeholder="Type to search loaded rows..."
               style="width: 220px; max-width: 100%; padding: 0.45rem 0.65rem; font-size: 0.85rem;"
             />
           </div>
@@ -921,6 +978,8 @@
     const groqModelSelect = document.getElementById("groqModelSelect");
     const saveGroqKeyBtn = document.getElementById("saveGroqKeyBtn");
     const forgetGroqKeyBtn = document.getElementById("forgetGroqKeyBtn");
+    const aiSettings = document.getElementById("aiSettings");
+    const aiKeySummary = document.getElementById("aiKeySummary");
     const groqKeyStatus = document.getElementById("groqKeyStatus");
     const aiStatusText = document.getElementById("aiStatusText");
     const aiQuestionInput = document.getElementById("aiQuestionInput");
@@ -928,14 +987,25 @@
 
     // Only explicitly remembered keys are persisted. Storage access can throw even on reads.
     const GROQ_STORAGE_KEY = "carta_groq_api_key";
+    let groqStorageWarning = false;
+
+    function updateAiKeySummary() {
+      aiKeySummary.textContent = groqStorageWarning
+        ? "Review key storage"
+        : groqApiKeyInput.value.trim() ? "Key entered" : "Key needed";
+      if (groqStorageWarning) aiSettings.open = true;
+    }
 
     function keepGroqKeyInTab(message) {
       try {
         localStorage.removeItem(GROQ_STORAGE_KEY);
+        groqStorageWarning = false;
         groqKeyStatus.textContent = message;
       } catch {
+        groqStorageWarning = true;
         groqKeyStatus.textContent = "Browser storage could not be cleared. A saved key may remain; clear this site's browser data. You can still use a key in this tab.";
       }
+      updateAiKeySummary();
     }
 
     function loadRememberedGroqKey() {
@@ -956,11 +1026,14 @@
             : "Invalid saved key removed. Enter a key for this tab only.");
         }
       } catch {
+        groqStorageWarning = true;
         groqKeyStatus.textContent = "Browser storage is unavailable. Enter a key for this tab. A previously saved key may remain; clear this site's browser data to remove it.";
       }
     }
 
     loadRememberedGroqKey();
+    updateAiKeySummary();
+    aiSettings.open = !groqApiKeyInput.value.trim() || groqStorageWarning;
 
     groqApiKeyInput.addEventListener("input", () => {
       keepGroqKeyInTab(groqApiKeyInput.value.trim()
@@ -976,7 +1049,9 @@
       }
       try {
         localStorage.setItem(GROQ_STORAGE_KEY, JSON.stringify({ version: 1, remember: true, key }));
+        groqStorageWarning = false;
         groqKeyStatus.textContent = "Key remembered on this device across visits. Use Forget key to remove it.";
+        updateAiKeySummary();
       } catch {
         keepGroqKeyInTab("Could not remember the key. It is available in this tab only, cleared on reload or close.");
       }
@@ -984,6 +1059,7 @@
 
     forgetGroqKeyBtn.addEventListener("click", () => {
       groqApiKeyInput.value = "";
+      aiSettings.open = true;
       keepGroqKeyInTab("Key forgotten in this tab and removed from this browser's saved storage.");
       if (activeAiRequestId !== null) {
         if (activeAiRequestId === reportRequestId) {
@@ -1401,7 +1477,7 @@
       const safety = result?.truncated
         ? `Partial result: output was truncated after ${result.rows.length.toLocaleString()} rows (${result.reason}). This is not a complete result. Narrow the report or select fewer columns.`
         : `Reports load at most ${MAX_RESULT_ROWS.toLocaleString()} rows and also have output-size limits.`;
-      return `${safety} ${scope} The quick filter searches loaded rows only. CSV downloads include all loaded rows, including any hidden by the quick filter.`;
+      return `${safety} ${scope} Search applies to loaded rows only. CSV downloads include all loaded rows, including rows hidden by the search.`;
     }
 
     function parseSourceTime(value, format) {
@@ -1555,14 +1631,13 @@
     document.querySelectorAll(".chip").forEach((chip) => {
       chip.addEventListener("click", () => {
         aiQuestionInput.value = chip.dataset.prompt;
-        if (!askAiBtn.disabled) {
-          askAiBtn.click();
-        }
+        aiQuestionInput.focus();
       });
     });
 
     aiQuestionInput.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" && !askAiBtn.disabled) {
+      if (e.key === "Enter" && !e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey && !e.isComposing && !askAiBtn.disabled) {
+        e.preventDefault();
         askAiBtn.click();
       }
     });
@@ -1895,7 +1970,7 @@ ${schemaText}`;
       for (const candidate of uniqueCandidates) {
         if (!isCurrent()) return null;
         usedModel = candidate;
-        aiStatusText.textContent = `Generating SQL with Groq (${usedModel})...`;
+        aiStatusText.textContent = "Preparing report...";
         const res = await callGroqChat(apiKey, usedModel, systemPrompt, userPrompt);
         if (!isCurrent()) return null;
         lastRes = res;
@@ -1925,7 +2000,8 @@ ${schemaText}`;
 
       askAiBtn.disabled = true;
       const title = `AI Search: "${question}"`;
-      const requestId = beginReportRequest(title, "Generating SQL with Groq...");
+      const requestId = beginReportRequest(title, "Preparing report...");
+      aiStatusText.textContent = "Preparing report...";
       activeAiRequestId = requestId;
       try {
         if (isOffTopicQuestion(question)) {
@@ -1936,14 +2012,17 @@ ${schemaText}`;
         }
 
         if (!apiKey) {
-          throw new Error("Please enter a Groq API key above to use the AI search. Get a key at console.groq.com/keys.");
+          aiSettings.open = true;
+          groqApiKeyInput.focus();
+          throw new Error("Enter a Groq API key in AI settings to create a report.");
         }
+        aiSettings.open = groqStorageWarning;
 
         const generated = await generateSqlWithGroq(apiKey, question, "", requestId);
         if (requestId !== reportRequestId) return;
         let { sql, usedModel } = generated;
         sqlQueryBox.value = sql;
-        aiStatusText.textContent = `SQL generated by ${usedModel}. Running report...`;
+        aiStatusText.textContent = "Loading results...";
 
         try {
           await executeQuery(sql, title, null, null, requestId);
@@ -1951,16 +2030,16 @@ ${schemaText}`;
           if (requestId !== reportRequestId) return;
           if (dbErr.code === "REPORT_LIMIT" || /out of memory|memory limit/i.test(dbErr.message || "")) throw dbErr;
           // 1-step self-correction with DuckDB error feedback
-          aiStatusText.textContent = "Refining SQL after DuckDB feedback...";
+          aiStatusText.textContent = "Adjusting report...";
           const retry = await generateSqlWithGroq(apiKey, question, dbErr.message || String(dbErr), requestId);
           if (requestId !== reportRequestId) return;
           sql = retry.sql;
           usedModel = retry.usedModel;
           sqlQueryBox.value = sql;
-          aiStatusText.textContent = `SQL generated by ${retry.usedModel}. Running report...`;
+          aiStatusText.textContent = "Loading results...";
           await executeQuery(sql, title, null, null, requestId);
         }
-        if (requestId === reportRequestId) aiStatusText.textContent = `Report ready. SQL generated by ${usedModel}.`;
+        if (requestId === reportRequestId) aiStatusText.textContent = "Report ready.";
       } catch (err) {
         if (requestId !== reportRequestId) return;
         aiStatusText.textContent = "AI report could not be completed.";
