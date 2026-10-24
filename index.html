@@ -78,16 +78,6 @@
           </select>
         </div>
         <div class="form-group">
-          <label for="builderLimit">Preview Row Limit</label>
-          <select id="builderLimit">
-            <option value="50">50 rows</option>
-            <option value="100" selected>100 rows</option>
-            <option value="250">250 rows</option>
-            <option value="500">500 rows</option>
-            <option value="1000">1,000 rows</option>
-          </select>
-        </div>
-        <div class="form-group">
           <button id="runBuilderBtn" class="btn" disabled>Run Report</button>
         </div>
       </div>
@@ -172,19 +162,35 @@
         <div id="resultsMeta" class="results-meta" role="status" aria-live="polite" aria-atomic="true">No report loaded yet</div>
         <div class="results-actions">
           <div class="form-group" style="max-width: 100%;">
-            <label for="quickSearchInput">Search these results</label>
+            <label for="quickSearchInput">Search this page</label>
             <input
               type="text"
               id="quickSearchInput"
               disabled
-              placeholder="Type to search loaded rows..."
+              placeholder="Type to search this page..."
               style="width: 220px; max-width: 100%; padding: 0.45rem 0.65rem; font-size: 0.85rem;"
             />
           </div>
-          <button id="exportCsvBtn" class="btn btn-success" aria-describedby="csvExportHelp" disabled>Download loaded rows (CSV)</button>
+          <button id="exportCsvBtn" class="btn btn-success" aria-describedby="csvExportHelp" disabled>Download this page (CSV)</button>
           <button id="stopReportBtn" class="btn btn-secondary" disabled>Stop report</button>
           <button id="reconnectBtn" class="btn" hidden>Reconnect</button>
         </div>
+      </div>
+
+      <div class="report-pagination" role="group" aria-label="Report page navigation">
+        <div class="form-group">
+          <label for="rowsPerPage">Rows per page</label>
+          <select id="rowsPerPage" disabled>
+            <option value="50">50</option>
+            <option value="100" selected>100</option>
+            <option value="250">250</option>
+            <option value="500">500</option>
+            <option value="1000">1,000</option>
+          </select>
+        </div>
+        <button id="previousPageBtn" class="btn btn-secondary" disabled>Previous</button>
+        <span id="pageStatus" role="status" aria-live="polite" aria-atomic="true">No page loaded</span>
+        <button id="nextPageBtn" class="btn btn-secondary" disabled>Next</button>
       </div>
 
       <div id="resultsFreshness" class="panel-subtitle" role="status" aria-live="polite"></div>

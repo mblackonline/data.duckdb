@@ -18,6 +18,7 @@
     const MAX_RESULT_COLUMNS = 100;
     const MAX_CELL_CHARACTERS = 100000;
     const REPORT_TIMEOUT_MS = 30000;
+    const REPORT_PAGE_SIZES = Object.freeze([50, 100, 250, 500, 1000]);
 
     // Friendly descriptions for CARTA datasets
     const DATASET_INFO = {
@@ -98,62 +99,54 @@
       {
         title: "Latest Bus Vehicle Positions",
         tag: "Customer Service",
-        desc: "View up to 100 vehicle positions, newest observation first.",
-        sql: 'SELECT * FROM data.gtfsrt_vehicle_positions_v1 ORDER BY NULLIF("timestamp", 0) DESC NULLS LAST LIMIT 100;',
-        rowLimit: 100,
+        desc: "Browse vehicle positions, newest observation first.",
+        sql: 'SELECT * FROM data.gtfsrt_vehicle_positions_v1 ORDER BY NULLIF("timestamp", 0) DESC NULLS LAST;',
         sourceTime: { column: "timestamp", format: "unix-seconds" }
       },
       {
         title: "Clever Vehicle Locations",
         tag: "Operations / Paratransit",
-        desc: "Check up to 100 Clever vehicle locations, newest timestamp first.",
-        sql: 'SELECT * FROM data.clever_vehicle_locations_v1 ORDER BY TRY_CAST("timestamp" AS TIMESTAMPTZ) DESC NULLS LAST LIMIT 100;',
-        rowLimit: 100,
+        desc: "Browse Clever vehicle locations, newest timestamp first.",
+        sql: 'SELECT * FROM data.clever_vehicle_locations_v1 ORDER BY TRY_CAST("timestamp" AS TIMESTAMPTZ) DESC NULLS LAST;',
         sourceTime: { column: "timestamp", format: "iso" }
       },
       {
         title: "Stop Predictions (Clever)",
         tag: "Customer Service",
         desc: "Show the newest prediction batches first, then the earliest predicted times.",
-        sql: `SELECT * FROM data.clever_predictions_v1 ORDER BY try_strptime("tmstmp", '%Y%m%d %H:%M') DESC NULLS LAST, try_strptime("prdtm", '%Y%m%d %H:%M') ASC NULLS LAST LIMIT 100;`,
-        rowLimit: 100,
+        sql: `SELECT * FROM data.clever_predictions_v1 ORDER BY try_strptime("tmstmp", '%Y%m%d %H:%M') DESC NULLS LAST, try_strptime("prdtm", '%Y%m%d %H:%M') ASC NULLS LAST;`,
         sourceTime: { column: "tmstmp", format: "clever-local" }
       },
       {
         title: "Trip Updates & Delays (GTFS-RT)",
         tag: "Customer Service",
         desc: "Inspect published trip updates. This dataset does not include an observation timestamp.",
-        sql: "SELECT * FROM data.gtfsrt_trip_updates_v1 LIMIT 100;",
-        rowLimit: 100,
+        sql: "SELECT * FROM data.gtfsrt_trip_updates_v1;",
         sourceTime: { unavailable: "Source observation time unavailable: this dataset has no observation timestamp. Predicted arrival and departure times do not establish freshness." }
       },
       {
-        title: "CARTA Bus Routes (Preview)",
+        title: "CARTA Bus Routes",
         tag: "Reference",
-        desc: "Preview CARTA bus routes and route names.",
-        sql: "SELECT * FROM data.simple_bus_routes LIMIT 200;",
-        rowLimit: 200
+        desc: "Browse CARTA bus routes and route names.",
+        sql: "SELECT * FROM data.simple_bus_routes;",
       },
       {
-        title: "CARTA Bus Stops (Preview)",
+        title: "CARTA Bus Stops",
         tag: "Customer Service",
         desc: "Browse bus stops to look up stop IDs and names for riders.",
-        sql: "SELECT * FROM data.simple_bus_stops LIMIT 250;",
-        rowLimit: 250
+        sql: "SELECT * FROM data.simple_bus_stops;",
       },
       {
         title: "CARTA Monthly Ridership (NTD)",
         tag: "Management",
         desc: "View CARTA monthly ridership figures reported to the NTD.",
-        sql: `SELECT * FROM data.ntd_monthly_ridership_v1 WHERE "NTD ID" = '${CARTA_NTD_ID}' ORDER BY "Date" DESC LIMIT 200;`,
-        rowLimit: 200
+        sql: `SELECT * FROM data.ntd_monthly_ridership_v1 WHERE "NTD ID" = '${CARTA_NTD_ID}' ORDER BY "Date" DESC;`,
       },
       {
         title: "Bike Chattanooga Stations",
         tag: "Mobility",
-        desc: "Preview Bike Chattanooga stations and dock capacities.",
-        sql: "SELECT * FROM data.bike_chattanooga_stations_v1 LIMIT 100;",
-        rowLimit: 100
+        desc: "Browse Bike Chattanooga stations and dock capacities.",
+        sql: "SELECT * FROM data.bike_chattanooga_stations_v1;",
       }
     ];
 
@@ -181,7 +174,6 @@
     const builderValue = document.getElementById("builderValue");
     const builderSortCol = document.getElementById("builderSortCol");
     const builderSortDir = document.getElementById("builderSortDir");
-    const builderLimit = document.getElementById("builderLimit");
     const runBuilderBtn = document.getElementById("runBuilderBtn");
     const sqlQueryBox = document.getElementById("sqlQueryBox");
     const runCustomSqlBtn = document.getElementById("runCustomSqlBtn");
@@ -194,6 +186,10 @@
     const quickSearchInput = document.getElementById("quickSearchInput");
     const stopReportBtn = document.getElementById("stopReportBtn");
     const reconnectBtn = document.getElementById("reconnectBtn");
+    const rowsPerPage = document.getElementById("rowsPerPage");
+    const previousPageBtn = document.getElementById("previousPageBtn");
+    const nextPageBtn = document.getElementById("nextPageBtn");
+    const pageStatus = document.getElementById("pageStatus");
 
     // Plain-English Search DOM elements
     const groqApiKeyInput = document.getElementById("groqApiKeyInput");
@@ -336,13 +332,12 @@
           <div>
             <div class="preset-card-title">${escapeHtml(report.title)}</div>
             <div class="preset-card-desc">${escapeHtml(report.desc)}</div>
-            <div class="preset-card-desc">Preview: up to ${report.rowLimit.toLocaleString()} rows</div>
           </div>
           <span class="preset-card-tag">${escapeHtml(report.tag)}</span>
         `;
         btn.addEventListener("click", () => {
           // executeQuery displays active-report errors; handle the event's rejected promise.
-          executeQuery(report.sql, report.title, report.sourceTime, report.rowLimit).catch(() => {});
+          executePagedQuery(report.sql, report.title, report.sourceTime).catch(() => {});
         });
         presetGrid.appendChild(btn);
       });
@@ -398,6 +393,7 @@
         runBuilderBtn.disabled = false;
         runCustomSqlBtn.disabled = false;
         askAiBtn.disabled = false;
+        rowsPerPage.disabled = false;
       } catch (err) {
         dbStatusDot.classList.add("error");
         dbStatusText.textContent = "Connection error";
@@ -468,7 +464,6 @@
       const val = builderValue.value.trim();
       const sortCol = builderSortCol.value;
       const sortDir = builderSortDir.value;
-      const limit = parseInt(builderLimit.value, 10) || 100;
 
       let sql = `SELECT * FROM data."${view}"`;
       if (col) {
@@ -492,16 +487,16 @@
         const safeSort = `"${sortCol.replace(/"/g, '""')}"`;
         sql += ` ORDER BY ${safeSort} ${sortDir}`;
       }
-      sql += ` LIMIT ${limit};`;
+      sql += ";";
 
       const label = DATASET_INFO[view]?.label || view;
-      executeQuery(sql, label, null, limit).catch(() => {});
+      executePagedQuery(sql, label).catch(() => {});
     });
 
     runCustomSqlBtn.addEventListener("click", () => {
       const sql = sqlQueryBox.value.trim();
       if (sql) {
-        executeQuery(sql, "Custom SQL Query").catch(() => {});
+        executePagedQuery(sql, "Custom SQL Query").catch(() => {});
       }
     });
 
@@ -544,7 +539,7 @@
     stopReportBtn.addEventListener("click", () => stopReports());
     reconnectBtn.addEventListener("click", () => globalThis.location.reload());
 
-    async function collectReportRows(reader, requestId) {
+    async function collectReportRows(reader, requestId, page = null) {
       await reader.open();
       if (requestId !== reportRequestId) return null;
       const columns = reader.schema.fields.map((field) => field.name);
@@ -554,11 +549,12 @@
       const rows = [];
       const partial = (reason) => {
         if (!rows.length) throw reportLimitError("A result row is too large to display safely. Select fewer columns or narrow the report.");
-        return { columns, rows, truncated: true, reason };
+        return { columns, rows, truncated: true, reason, ...(page ? { hasMore: true } : {}) };
       };
       for await (const batch of reader) {
         if (requestId !== reportRequestId) return null;
         for (let index = 0; index < batch.numRows; index++) {
+          if (page && rows.length >= page.size) return { columns, rows, truncated: false, hasMore: true };
           if (rows.length >= MAX_RESULT_ROWS) return partial("row limit");
           if ((rows.length + 1) * columns.length > MAX_RESULT_CELLS) return partial("output size");
           const sourceRow = batch.get(index);
@@ -580,10 +576,10 @@
         // Let the main thread process Stop and deadline events between result batches.
         await new Promise((resolve) => setTimeout(resolve, 0));
       }
-      return { columns, rows, truncated: false };
+      return { columns, rows, truncated: false, ...(page ? { hasMore: false } : {}) };
     }
 
-    async function runBoundedReport(sql, requestId) {
+    async function runBoundedReport(sql, requestId, page = null) {
       const bindings = db;
       let reject;
       const stopped = new Promise((resolve, no) => { reject = no; });
@@ -597,11 +593,18 @@
         try {
           queryConnection = await bindings.connect();
           if (requestId !== reportRequestId) return null;
-          await validateCartaSql(sql, queryConnection);
+          const parsed = await validateCartaSql(sql, queryConnection);
           if (requestId !== reportRequestId) return null;
-          reader = await queryConnection.send(sql, true);
-          const result = await collectReportRows(reader, requestId);
-          complete = result !== null && !result.truncated;
+          let executionSql = sql;
+          if (page) {
+            if (!Number.isSafeInteger(page.offset) || page.offset < 0 || !Number.isSafeInteger(page.size) || page.size < 1 || page.size > 1000 || !Number.isSafeInteger(page.offset + page.size + 1)) throw reportLimitError("Invalid report page.");
+            const normalized = await normalizeReportSql(parsed, queryConnection, sql);
+            if (requestId !== reportRequestId) return null;
+            executionSql = `SELECT * FROM (${normalized.sql}) AS "carta_page"${normalized.ordered ? "" : " ORDER BY ALL"} LIMIT ${page.size + 1} OFFSET ${page.offset}`;
+          }
+          reader = await queryConnection.send(executionSql, true);
+          const result = await collectReportRows(reader, requestId, page);
+          complete = result !== null && !result.truncated && !result.hasMore;
           return result;
         } finally {
           // A hard stop discards this worker. Never await cleanup messages to a dead worker.
@@ -630,7 +633,11 @@
       currentReport = null;
       quickSearchInput.disabled = true;
       exportCsvBtn.disabled = true;
-      exportCsvBtn.textContent = "Download loaded rows (CSV)";
+      exportCsvBtn.textContent = "Download this page (CSV)";
+      previousPageBtn.disabled = true;
+      nextPageBtn.disabled = true;
+      rowsPerPage.disabled = true;
+      pageStatus.textContent = "No page loaded";
     }
 
     function beginReportRequest(title, message = "Loading data from CARTA S3...") {
@@ -657,7 +664,47 @@
       showError(err.message || String(err));
     }
 
-    async function executeQuery(sql, title = "Query Results", sourceTime = null, rowLimit = null, requestId = null) {
+    function executePagedQuery(sql, title = "Query Results", sourceTime = null, requestId = null, page = null) {
+      const size = Number(rowsPerPage.value);
+      return executeQuery(sql, title, sourceTime, null, requestId, page || {
+        size: REPORT_PAGE_SIZES.includes(size) ? size : 100, offset: 0, previous: []
+      });
+    }
+
+    async function navigateReportPage(direction) {
+      const report = currentReport;
+      if (!report?.page || (direction === "next" && !report.page.hasMore) || (direction === "previous" && !report.page.previous.length)) return;
+      const control = direction === "next" ? nextPageBtn : previousPageBtn;
+      const restoreFocus = document.activeElement === control;
+      const page = report.page;
+      const previous = [...page.previous];
+      const offset = direction === "next" ? page.offset + currentRows.length : previous.pop();
+      if (direction === "next") previous.push(page.offset);
+      const pageRequestId = reportRequestId + 1;
+      try {
+        await executePagedQuery(report.querySql, report.title, report.sourceTime, null, { size: page.size, offset, previous });
+      } catch { /* The shared execution path displays errors and invalidates exports. */ }
+      if (pageRequestId !== reportRequestId) return;
+      if (restoreFocus && (document.activeElement === document.body || document.activeElement === control)) {
+        const other = direction === "next" ? previousPageBtn : nextPageBtn;
+        const target = control.disabled ? (other.disabled ? rowsPerPage : other) : control;
+        if (!target.disabled) target.focus();
+        else if (!reconnectBtn.hidden) reconnectBtn.focus();
+      }
+    }
+
+    previousPageBtn.addEventListener("click", () => navigateReportPage("previous"));
+    nextPageBtn.addEventListener("click", () => navigateReportPage("next"));
+    rowsPerPage.addEventListener("change", async () => {
+      const report = currentReport;
+      if (!report?.page) return;
+      const restoreFocus = document.activeElement === rowsPerPage;
+      const pageRequestId = reportRequestId + 1;
+      try { await executePagedQuery(report.querySql, report.title, report.sourceTime); } catch { /* Shared report error handling. */ }
+      if (pageRequestId === reportRequestId && restoreFocus && !rowsPerPage.disabled && (document.activeElement === document.body || document.activeElement === rowsPerPage)) rowsPerPage.focus();
+    });
+
+    async function executeQuery(sql, title = "Query Results", sourceTime = null, rowLimit = null, requestId = null, page = null) {
       if (!conn) return;
       if (requestId === null) requestId = beginReportRequest(title);
       if (requestId !== reportRequestId) return;
@@ -672,23 +719,37 @@
 
       const t0 = performance.now();
       try {
-        const result = await runBoundedReport(sql, requestId);
+        const result = await runBoundedReport(sql, requestId, page);
         if (requestId !== reportRequestId || !result) return;
         const elapsedMs = Math.round(performance.now() - t0);
 
         currentColumns = result.columns;
         currentRows = result.rows;
-        currentReport = { title, elapsedMs, truncated: result.truncated };
-        resultsScope.textContent = describeResultScope(rowLimit, result);
+        currentReport = { title, elapsedMs, truncated: result.truncated, ...(page ? {
+          querySql: sql, sourceTime, page: { ...page, hasMore: result.hasMore }
+        } : {}) };
+        resultsScope.textContent = page
+          ? `${result.truncated ? `Partial page: loaded ${result.rows.length} rows (${result.reason}); use Next to continue. ` : ""}Report SQL defines the matching rows. Browse them a page at a time. Search checks this page only; CSV contains all loaded rows on this page, including rows hidden by search. Source changes or tied sort values may shift rows between pages.`
+          : describeResultScope(rowLimit, result);
         resultsFreshness.textContent = `${describeSourceFreshness(currentRows, sourceTime)} Report retrieved: ${reportTimeFormatter.format(new Date())} (${REPORT_TIME_ZONE}).`;
         exportCsvBtn.disabled = currentRows.length === 0;
-        exportCsvBtn.textContent = `Download all ${currentRows.length.toLocaleString()} loaded rows (CSV${result.truncated ? ", partial" : ""})`;
+        exportCsvBtn.textContent = page ? `Download this page (CSV${result.truncated ? ", partial" : ""})` : `Download all ${currentRows.length.toLocaleString()} loaded rows (CSV${result.truncated ? ", partial" : ""})`;
         quickSearchInput.disabled = currentRows.length === 0;
+        if (page) {
+          const number = page.previous.length + 1;
+          pageStatus.textContent = currentRows.length
+            ? `Page ${number} · Rows ${(page.offset + 1).toLocaleString()}–${(page.offset + currentRows.length).toLocaleString()} · ${result.hasMore ? "more available" : "end of results"}`
+            : `Page ${number} · No rows${page.offset ? "; source data may have changed" : ""}`;
+          previousPageBtn.disabled = !page.previous.length;
+          nextPageBtn.disabled = !result.hasMore;
+        }
         applyQuickFilter();
       } catch (err) {
         if (requestId !== reportRequestId) return;
         showReportError(title, err);
         throw err;
+      } finally {
+        if (requestId === reportRequestId) rowsPerPage.disabled = !conn;
       }
     }
 
@@ -790,7 +851,7 @@
           )
         : currentRows;
       if (currentReport) {
-        resultsMeta.textContent = `${currentReport.title}: ${filtered.length.toLocaleString()} displayed / ${currentRows.length.toLocaleString()} loaded rows (${currentReport.elapsedMs} ms)${currentReport.truncated ? " [Partial result]" : ""}`;
+        resultsMeta.textContent = `${currentReport.title}: ${filtered.length.toLocaleString()} displayed / ${currentRows.length.toLocaleString()} loaded rows${currentReport.page ? ` on page ${currentReport.page.previous.length + 1}` : ""} (${currentReport.elapsedMs} ms)${currentReport.truncated ? " [Partial result]" : ""}`;
       }
       renderTable(filtered);
     }
@@ -809,7 +870,7 @@
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `carta_report_${new Date().toISOString().slice(0, 10)}${currentReport.truncated ? "_partial" : ""}.csv`;
+      a.download = `carta_report_${new Date().toISOString().slice(0, 10)}${currentReport.page ? `_page_${currentReport.page.previous.length + 1}` : ""}${currentReport.truncated ? "_partial" : ""}.csv`;
       a.click();
       URL.revokeObjectURL(url);
     });
@@ -1012,6 +1073,20 @@
         await statement.close();
       }
       validateCartaSqlAst(parsed, availableViews);
+      return parsed;
+    }
+
+    async function normalizeReportSql(parsed, queryConnection) {
+      const statement = await queryConnection.prepare("SELECT json_deserialize_sql(CAST(? AS JSON)) AS sql");
+      try {
+        const result = await statement.query(JSON.stringify(parsed));
+        const sql = result.toArray()[0].sql;
+        if (typeof sql !== "string" || !sql.trim()) throw reportLimitError("Could not prepare the report page.");
+        return {
+          sql: sql.trim().replace(/;$/, ""),
+          ordered: parsed.statements[0].node.modifiers?.some(modifier => modifier.type === "ORDER_MODIFIER") || false
+        };
+      } finally { await statement.close(); }
     }
 
     function validateCartaSqlAst(parsed, views) {
@@ -1171,7 +1246,7 @@ Rules:
    - CARTA's "NTD ID" is '${CARTA_NTD_ID}'. For CARTA questions, use WHERE "NTD ID" = '${CARTA_NTD_ID}'. Its separate "Legacy NTD ID" is '4001'; do not confuse these columns.
    - Default to CARTA only. Omit or change this agency filter only when the user explicitly requests another agency or a regional/national comparison. Do not identify CARTA by "Agency" text or "UZA Name", which describe names or geography rather than the exact agency identifier.
    - The "Mode" column uses 2-letter NTD codes: 'MB' (Motor Bus), 'DR' (Demand Response / Paratransit), 'IP' (Inclined Plane). The "3 Mode" column uses 'Bus' or 'Demand Response'.
-4. Include LIMIT 100 unless the query is an aggregation (COUNT, SUM, AVG, GROUP BY) or the user requests a specific limit.
+4. Do not add LIMIT unless the user explicitly requests a fixed number of records or a top/bottom list. The application paginates results separately; it does not need a preview LIMIT. Use a deterministic ORDER BY where practical.
 5. STRICT GUARDRAIL: Every query MUST include a FROM data.<table_name> clause referencing one of the tables in Schema. Never output a SELECT with only literal strings/numbers to answer general knowledge, coding, or non-CARTA questions. If the user's request is not about querying the CARTA tables listed in Schema, output the single word: UNSUPPORTED_QUERY
 
 Schema:
@@ -1247,7 +1322,7 @@ ${schemaText}`;
         aiStatusText.textContent = "Loading results...";
 
         try {
-          await executeQuery(sql, title, null, null, requestId);
+          await executePagedQuery(sql, title, null, requestId);
         } catch (dbErr) {
           if (requestId !== reportRequestId) return;
           if (dbErr.code === "REPORT_LIMIT" || /out of memory|memory limit/i.test(dbErr.message || "")) throw dbErr;
@@ -1259,7 +1334,7 @@ ${schemaText}`;
           usedModel = retry.usedModel;
           sqlQueryBox.value = sql;
           aiStatusText.textContent = "Loading results...";
-          await executeQuery(sql, title, null, null, requestId);
+          await executePagedQuery(sql, title, null, requestId);
         }
         if (requestId === reportRequestId) aiStatusText.textContent = "Report ready.";
       } catch (err) {
@@ -1271,6 +1346,7 @@ ${schemaText}`;
           activeAiRequestId = null;
           askAiBtn.disabled = false;
           if (!activeQueries.size) stopReportBtn.disabled = true;
+          if (requestId === reportRequestId && !activeQueries.size) rowsPerPage.disabled = !conn;
         }
       }
     });

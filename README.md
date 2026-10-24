@@ -30,13 +30,28 @@ than opening `index.html` directly as a local file.
 Run the report, key-handling, CSV, and SQL-policy regression checks with:
 
 ```powershell
-node --test --test-reporter=dot tests/report-state.test.cjs tests/api-key.test.cjs tests/csv-export.test.cjs tests/sql-policy.test.cjs
+node --test --test-reporter=dot tests/report-state.test.cjs tests/pagination.test.cjs tests/api-key.test.cjs tests/csv-export.test.cjs tests/sql-policy.test.cjs
 ```
 
 The optional `tests/accessibility-browser.cjs` and `tests/query-limits-wasm.cjs`
 checks accept temporary dependency prefixes as documented at the top of each
 script. The browser check serves the real HTML, CSS, and JavaScript files while
 mocking external data and AI requests.
+
+Reports use the shared Rows per page control, defaulting to 100. Previous and Next
+load another page without accumulating all rows in the page's JavaScript state.
+Preset and builder queries have no automatic total-row limit; AI instructions
+request a LIMIT only when the question explicitly asks for one. Limits written in
+report SQL are preserved. SQL is validated and reconstructed by DuckDB before an
+outer page limit/offset is applied, so aggregation still uses the full input.
+
+Queries without an explicit order use output-column ordering. For repeatable
+pages, specify a unique ordering in SQL. Each page is a fresh read, so changing
+source data or tied sort values can move rows between pages. Very expensive
+queries and oversized cells/pages still have resource safeguards and cancellation.
+Search applies to the current page, and CSV downloads currently contain only that
+page's loaded rows, including rows hidden by search. Full-report CSV export is a
+separate follow-up.
 
 ## Background
 Both data availability and access are important.  CARTA publishes all its open datasets using [datablob](https://pypi.org/project/datablob) in numerous file formats, including parquet.  After making data available, we wanted to drive down the friction in accessing and analyzing the data, so we created data.duckdb.  A single DuckDB database that points to all our open datasets.  It enables people to easily query, filter, and join all our open datasets.

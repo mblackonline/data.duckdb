@@ -27,12 +27,14 @@ assert(executablePath, "Provide the path to an installed Chromium browser.");
 
 // This fixture tests UI behavior; real SQL parsing and execution are covered by the separate policy/Wasm checks.
 const fixtureModule = `
-  const rows = Array.from({length: 40}, (_, index) => ({
+  const makeRows = count => Array.from({length: count}, (_, index) => ({
     Route: index === 0 ? 'Market Street' : 'Route ' + index,
     Description: 'Public transit route details '.repeat(18), Longitude: -85.3097
   }));
+  let rows = makeRows(40);
+  globalThis.fixtureSetRows = count => { rows = makeRows(count); };
   function table(values) { return {
-    schema: {fields: Object.keys(values[0] || {}).map(name => ({name}))},
+    schema: {fields: Object.keys(values[0] || rows[0]).map(name => ({name}))},
     numRows: values.length, get: index => values[index], toArray: () => values
   }; }
   function connection() { return {
@@ -41,15 +43,19 @@ const fixtureModule = `
       if (sql.startsWith('DESCRIBE')) return table(Object.keys(rows[0]).map(column_name => ({column_name, column_type: 'VARCHAR'})));
       return table([rows[0]]);
     },
-    prepare: async () => ({
-      query: async () => table([{ast: JSON.stringify({statements: [{node: {
-        type: 'SELECT_NODE', from_table: {type: 'BASE_TABLE', schema_name: 'data', table_name: 'simple_bus_routes'}
-      }}]})}]), close: async () => {}
+    prepare: async statement => ({
+      query: async value => statement.includes('json_deserialize_sql')
+        ? table([{sql: JSON.parse(value).fixtureSql.replace(/;\\s*$/, '')}])
+        : table([{ast: JSON.stringify({fixtureSql: value, statements: [{node: {
+          type: 'SELECT_NODE', from_table: {type: 'BASE_TABLE', schema_name: 'data', table_name: 'simple_bus_routes'}, modifiers: []
+        }}]})}]), close: async () => {}
     }),
-    send: async () => {
+    send: async sql => {
       if (globalThis.fixtureHold) await new Promise(resolve => {globalThis.fixtureFinish = resolve;});
       if (globalThis.fixtureFail) throw Error('Fixture report unavailable.');
-      return {schema: table(rows).schema, open: async () => {}, cancel: async () => {}, async *[Symbol.asyncIterator]() {yield table(rows);}};
+      const page = sql.match(/LIMIT (\\d+) OFFSET (\\d+)$/);
+      const values = page ? rows.slice(Number(page[2]), Number(page[2]) + Number(page[1])) : rows;
+      return {schema: table(rows).schema, open: async () => {}, cancel: async () => {}, async *[Symbol.asyncIterator]() {yield table(values);}};
     }, cancelSent: async () => true, close: async () => {}
   }; }
   export const getJsDelivrBundles = () => ({});
@@ -90,7 +96,7 @@ async function main() {
         if (route.request().method() === "OPTIONS") return route.fulfill({ status: 204, headers });
         aiRequests++;
         if (aiResponseGate) await aiResponseGate;
-        return route.fulfill({ contentType: "application/json", headers, body: JSON.stringify({ choices: [{ message: { content: "SELECT * FROM data.simple_bus_routes LIMIT 100" } }] }) });
+        return route.fulfill({ contentType: "application/json", headers, body: JSON.stringify({ choices: [{ message: { content: "SELECT * FROM data.simple_bus_routes" } }] }) });
       }
       return route.abort();
     });
@@ -165,7 +171,7 @@ async function main() {
     await page.getByText(/40 displayed \/ 40 loaded rows/).waitFor();
     assert(await routes.evaluate(element => element === document.activeElement), "Report completion must preserve focus");
     assert.equal(await page.locator("th[scope=col]").count(), 3);
-    const quickFilter = page.getByRole("textbox", { name: "Search these results", exact: true });
+    const quickFilter = page.getByRole("textbox", { name: "Search this page", exact: true });
     await tabTo(quickFilter);
     await page.keyboard.type("Market");
     await page.getByText(/1 displayed \/ 40 loaded rows/).waitFor();
@@ -174,7 +180,7 @@ async function main() {
     await page.keyboard.press("Enter"); await page.keyboard.press("Tab");
     assert(await page.getByRole("textbox", { name: "Report SQL", exact: true }).evaluate(element => element === document.activeElement));
     const resultTree = await page.locator(".results-card").ariaSnapshot();
-    assert.match(resultTree, /textbox "Search these results"/);
+    assert.match(resultTree, /textbox "Search this page"/);
     assert.match(resultTree, /textbox "Report SQL"/);
     assert.match(resultTree, /region "Report results"/);
     assert.match(resultTree, /table "Loaded report rows"/);
@@ -277,6 +283,35 @@ async function main() {
     await audit("Simplified AI panel, key setup at 320px");
     await page.locator("#aiSettings > summary").click();
     await page.locator("#panel-ai").screenshot({ path: path.join(prefix, "ai-screen-mobile.png") });
+    await page.setViewportSize({ width: 1280, height: 1000 });
+    await page.evaluate(() => globalThis.fixtureSetRows(6505));
+    await page.locator("#tab-builder").click();
+    await page.getByRole("button", { name: "Run Report", exact: true }).click();
+    await page.getByText(/100 displayed \/ 100 loaded rows on page 1/).waitFor();
+    await page.getByLabel("Rows per page", { exact: true }).selectOption("1000");
+    await page.getByText(/1,000 displayed \/ 1,000 loaded rows on page 1/).waitFor();
+    for (let number = 2; number <= 7; number++) {
+      await page.getByRole("button", { name: "Next", exact: true }).click();
+      await page.locator("#pageStatus").filter({ hasText: `Page ${number} ·` }).waitFor();
+    }
+    assert.equal(await page.locator("tbody tr").count(), 505);
+    assert.match(await page.locator("#pageStatus").textContent(), /6,001.*6,505.*end of results/);
+    assert(await page.getByRole("button", { name: "Next", exact: true }).isDisabled());
+    assert.equal(await focusedId(), "previousPageBtn");
+    await page.keyboard.press("Enter");
+    await page.locator("#pageStatus").filter({ hasText: "Page 6 ·" }).waitFor();
+    assert.equal(await page.locator("tbody tr").count(), 1000);
+    await page.getByLabel("Rows per page", { exact: true }).focus();
+    await page.getByLabel("Rows per page", { exact: true }).selectOption("50");
+    await page.getByText(/50 displayed \/ 50 loaded rows on page 1/).waitFor();
+    assert.equal(await focusedId(), "rowsPerPage");
+    await quickFilter.fill("Route 6504");
+    await page.getByText(/0 displayed \/ 50 loaded rows on page 1/).waitFor();
+    assert(!await page.getByRole("button", { name: "Next", exact: true }).isDisabled());
+    assert.equal(await page.locator("#exportCsvBtn").textContent(), "Download this page (CSV)");
+    await quickFilter.fill("");
+    await audit("Paged report beyond 5000 rows and page-size controls");
+    console.log("PASS: builder browses 6,505 rows, last-page focus is preserved, page size resets, search/CSV are page-scoped");
     assert.deepEqual(errors, []);
     console.log("PASS: question-first AI panel, disclosure keyboard access, remembered/missing key states, reviewed examples, textarea shortcuts and progress");
     console.log("Manual screen-reader speech and browser zoom checks remain separate verification.");

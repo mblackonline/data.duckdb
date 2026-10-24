@@ -26,7 +26,7 @@ function result(rows) {
 function harness({ actualGenerator = false, storage = { getItem() { return null; }, setItem() {}, removeItem() {} } } = {}) {
   const queries = [], generations = [], apiCalls = [], downloads = [];
   const context = { console, Blob, TextEncoder, setTimeout, clearTimeout, performance: { now: () => 0 } };
-  for (const name of ["quickSearchInput", "exportCsvBtn", "resultsMeta", "resultsScope", "resultsFreshness", "sqlQueryBox", "runCustomSqlBtn", "runBuilderBtn", "stopReportBtn", "reconnectBtn", "presetGrid", "dbStatusDot", "dbStatusText", "tableContainer", "errorBanner", "askAiBtn", "aiQuestionInput", "groqApiKeyInput", "groqKeyStatus", "aiStatusText", "groqModelSelect", "saveGroqKeyBtn", "forgetGroqKeyBtn", "aiSettings", "aiKeySummary"]) {
+  for (const name of ["quickSearchInput", "exportCsvBtn", "resultsMeta", "resultsScope", "resultsFreshness", "sqlQueryBox", "runCustomSqlBtn", "runBuilderBtn", "stopReportBtn", "reconnectBtn", "presetGrid", "dbStatusDot", "dbStatusText", "tableContainer", "errorBanner", "askAiBtn", "aiQuestionInput", "groqApiKeyInput", "groqKeyStatus", "aiStatusText", "groqModelSelect", "saveGroqKeyBtn", "forgetGroqKeyBtn", "aiSettings", "aiKeySummary", "rowsPerPage", "previousPageBtn", "nextPageBtn", "pageStatus"]) {
     context[name] = { value: "", textContent: "", innerHTML: "", disabled: false, hidden: false, style: {}, focus() {}, classList: { add() {}, remove() {} }, listeners: new Map(), querySelectorAll: () => [], addEventListener(type, fn) { this.listeners.set(type, fn); } };
   }
   const connections = [];
@@ -61,6 +61,7 @@ function harness({ actualGenerator = false, storage = { getItem() { return null;
     CARTA_NTD_ID: "40001",
     isOffTopicQuestion: () => false,
     validateCartaSql() {},
+    normalizeReportSql: async (parsed, connection, sql) => ({ sql, ordered: true }),
     buildGroqSchemaPrompt: async () => "Table data.simple_bus_routes: name VARCHAR",
     extractSql: sql => sql,
     callGroqChat(key, model) { const pending = deferred(); apiCalls.push({ model, ...pending }); return pending.promise; },
@@ -73,6 +74,7 @@ function harness({ actualGenerator = false, storage = { getItem() { return null;
   context.groqModelSelect.value = "openai/gpt-oss-120b";
   context.aiQuestionInput.value = "List CARTA routes";
   context.reconnectBtn.hidden = true;
+  context.rowsPerPage.value = "100";
   vm.createContext(context);
   const blocks = [
     section("    // State", "    // DOM elements"),
@@ -89,6 +91,10 @@ function harness({ actualGenerator = false, storage = { getItem() { return null;
   return {
     ui: context, queries, generations, apiCalls, downloads, connections,
     run: (sql, title = sql) => context.executeQuery(sql, title),
+    runPage: (sql, title = sql, page = null) => context.executePagedQuery(sql, title, null, null, page),
+    next: () => context.nextPageBtn.listeners.get("click")(),
+    previous: () => context.previousPageBtn.listeners.get("click")(),
+    changePageSize(value) { context.rowsPerPage.value = String(value); return context.rowsPerPage.listeners.get("change")(); },
     ask: () => context.askAiBtn.listeners.get("click")(),
     filter(value) { context.quickSearchInput.value = value; context.quickSearchInput.listeners.get("input")(); },
     export: () => context.exportCsvBtn.listeners.get("click")(),
@@ -141,7 +147,7 @@ test("a failed report cannot restore or export previous rows", async () => {
   assert.equal(h.state().report, null); assert.equal(h.downloads.length, 0);
   assert.equal(h.ui.tableContainer.innerHTML, errorTable);
   assert.equal(h.ui.errorBanner.textContent, "network unavailable");
-  assert.equal(h.ui.exportCsvBtn.textContent, "Download loaded rows (CSV)");
+  assert.equal(h.ui.exportCsvBtn.textContent, "Download this page (CSV)");
 });
 
 test("an old success cannot replace a newer report", async () => {

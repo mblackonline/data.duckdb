@@ -60,9 +60,49 @@ async function main() {
     assert.deepEqual(h.state().rows[0], { grp: "0", records: "2", total: "6000" });
     console.log("PASS: 6,000-group result is marked partial, with complete totals for returned groups");
 
+    h.ui.rowsPerPage.value = "1000";
+    await h.runPage("SELECT route_id FROM data.simple_bus_routes ORDER BY route_id; -- trailing comment", "Paged rows");
+    const seen = [];
+    do {
+      assert(h.state().rows.length <= 1000);
+      seen.push(...h.state().rows.map(row => Number(row.route_id)));
+      if (!h.state().report.page.hasMore) break;
+      await h.next();
+    } while (true);
+    assert.deepEqual(seen, Array.from({ length: 10000 }, (_, index) => index));
+    assert.equal(h.ui.nextPageBtn.disabled, true);
+    await h.previous();
+    assert.equal(h.state().rows[0].route_id, "8000");
+    console.log("PASS: All 10,000 rows are browsable in bounded pages, with working Previous/Next");
+
+    await h.runPage("WITH selected AS (SELECT * FROM data.simple_bus_routes) SELECT route_id FROM selected ORDER BY route_id DESC LIMIT 23 OFFSET 5; -- keep this limit", "Explicit limit");
+    assert.equal(h.state().rows.length, 23);
+    assert.equal(h.state().rows[0].route_id, "9994");
+    assert.equal(h.state().rows[22].route_id, "9972");
+    assert.equal(h.state().report.page.hasMore, false);
+    console.log("PASS: Canonical paging preserves CTEs, requested ordering, explicit LIMIT/OFFSET and trailing comments");
+
+    await h.runPage("SELECT -route_id AS reverse_id FROM data.simple_bus_routes", "Default ordering");
+    assert.equal(h.state().rows[0].reverse_id, "-9999");
+    await h.next();
+    assert.equal(h.state().rows[0].reverse_id, "-8999");
+    console.log("PASS: Unordered reports use deterministic output-column sorting for paging");
+
+    await h.runPage("SELECT COUNT(*) AS records, SUM(route_id) AS total FROM data.simple_bus_routes", "Paged total");
+    assert.deepEqual(h.state().rows, [{ records: "10000", total: "49995000" }]);
+    await h.runPage("SELECT route_id % 6000 AS grp, COUNT(*) AS records, SUM(route_id) AS total FROM data.simple_bus_routes GROUP BY grp ORDER BY grp", "Paged groups");
+    let records = 0, total = 0, groups = 0;
+    do {
+      for (const row of h.state().rows) { groups++; records += Number(row.records); total += Number(row.total); }
+      if (!h.state().report.page.hasMore) break;
+      await h.next();
+    } while (true);
+    assert.deepEqual({ groups, records, total }, { groups: 6000, records: 10000, total: 49995000 });
+    console.log("PASS: Paged aggregations preserve complete totals across all 6,000 groups");
+
     // Accelerate the same deadline callback so the smoke test does not wait 30 seconds.
     h.ui.setTimeout = (fn, ms) => setTimeout(fn, ms === 30000 ? 200 : ms);
-    await h.run("SELECT SUM(a.route_id::DOUBLE * b.route_id::DOUBLE * c.route_id::DOUBLE) AS total FROM data.simple_bus_routes a CROSS JOIN data.simple_bus_routes b CROSS JOIN data.simple_bus_routes c", "Expensive join");
+    await h.runPage("SELECT SUM(a.route_id::DOUBLE * b.route_id::DOUBLE * c.route_id::DOUBLE) AS total FROM data.simple_bus_routes a CROSS JOIN data.simple_bus_routes b CROSS JOIN data.simple_bus_routes c", "Expensive join");
     assert.match(h.ui.errorBanner.textContent, /30 seconds/);
     assert.equal(h.ui.reconnectBtn.hidden, false);
     assert.equal(h.state().pendingQueries, 0);
