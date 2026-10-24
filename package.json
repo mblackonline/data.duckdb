@@ -1,0 +1,11 @@
+{
+  "name": "carta-open-data-explorer-poc",
+  "private": true,
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "dependencies": {
+    "@netlify/blobs": "11.1.6",
+    "jose": "6.2.13"
+  }
+}

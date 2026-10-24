@@ -19,8 +19,8 @@ Report Assistant. Queries run in your browser using DuckDB.
 A hosted version is planned for Netlify.
 
 AI reporting is planned for authorized Microsoft 365 users only, with the Groq
-key kept on the server. Sign-in and the protected backend are not implemented
-yet. Non-AI reporting will remain publicly available.
+key kept on the server. The protected backend is implemented locally; Microsoft
+sign-in and browser integration are pending. Non-AI reporting remains public.
 
 Download report (CSV) exports the full matching report, preserving SQL limits.
 Search this page affects only the displayed page. See Download help for export
@@ -29,7 +29,7 @@ limits and Excel guidance.
 Run the regression checks with Node.js:
 
 ```powershell
-node --test --test-reporter=dot tests/report-state.test.cjs tests/pagination.test.cjs tests/ai-report.test.cjs tests/api-key.test.cjs tests/csv-export.test.cjs tests/full-csv.test.cjs tests/sql-policy.test.cjs
+node --test --test-reporter=dot tests/report-state.test.cjs tests/pagination.test.cjs tests/ai-report.test.cjs tests/api-key.test.cjs tests/csv-export.test.cjs tests/full-csv.test.cjs tests/sql-policy.test.cjs tests/protected-api.test.mjs
 ```
 
 ## Background

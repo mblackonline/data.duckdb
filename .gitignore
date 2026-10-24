@@ -225,3 +225,4 @@ __marimo__/
 # Netlify local state and environment variants
 .netlify/
 .env.*
+node_modules/
