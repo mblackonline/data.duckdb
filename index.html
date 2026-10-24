@@ -22,7 +22,7 @@
     <div class="tabs" role="tablist" aria-label="Report tools">
       <button id="tab-presets" class="tab-btn active" role="tab" aria-controls="panel-presets" aria-selected="true" tabindex="0" data-tab="panel-presets">1. One-Click Reports</button>
       <button id="tab-builder" class="tab-btn" role="tab" aria-controls="panel-builder" aria-selected="false" tabindex="-1" data-tab="panel-builder">2. Visual Filter Builder</button>
-      <button id="tab-ai" class="tab-btn" role="tab" aria-controls="panel-ai" aria-selected="false" tabindex="-1" data-tab="panel-ai">3. Ask in Plain English</button>
+      <button id="tab-ai" class="tab-btn" role="tab" aria-controls="panel-ai" aria-selected="false" tabindex="-1" data-tab="panel-ai">3. AI Report Assistant</button>
     </div>
 
     <!-- TAB 1: ONE-CLICK PRESETS -->
@@ -96,7 +96,7 @@
     <!-- TAB 3: ASK IN PLAIN ENGLISH (GROQ AI) -->
     <section id="panel-ai" class="panel" role="tabpanel" aria-labelledby="tab-ai" tabindex="0" hidden>
       <div class="ai-workspace">
-        <h2>Ask CARTA data</h2>
+        <h2>AI Report Assistant</h2>
         <p class="panel-subtitle">Describe the report you need.</p>
 
         <label for="aiQuestionInput" class="field-label">Your question</label>
@@ -106,7 +106,7 @@
         <p id="aiQuestionHelp" class="ai-input-hint">Enter to create a report. Shift+Enter adds a new line.</p>
         <div class="ai-actions">
           <p id="aiPrivacyWarning" class="ai-warning">
-            Questions and public dataset samples are sent to Groq.
+            Questions and public dataset samples are sent to an external AI provider.
             <strong>Do not enter confidential information, personal information, passwords, or API keys.</strong>
           </p>
           <button id="askAiBtn" class="btn" disabled>Create report</button>
@@ -125,9 +125,9 @@
           <div class="ai-settings-content ai-detail-copy">
             <div class="ai-settings-grid">
               <div class="form-group">
-                <label for="groqApiKeyInput">Groq API key</label>
+                <label for="groqApiKeyInput">API key for Groq (AI provider)</label>
                 <input type="password" id="groqApiKeyInput" placeholder="gsk_..." autocomplete="off" aria-describedby="groqKeyStorageHelp" />
-                <a href="https://console.groq.com/keys" target="_blank" rel="noopener">Get a Groq API key</a>
+                <a href="https://console.groq.com/keys" target="_blank" rel="noopener">Get an API key</a>
                 <div class="ai-key-actions">
                   <button id="saveGroqKeyBtn" type="button" class="btn btn-secondary">Remember on this device</button>
                   <button id="forgetGroqKeyBtn" type="button" class="btn btn-secondary">Forget key</button>
@@ -152,10 +152,10 @@
         </details>
 
         <details class="ai-details" id="aiPrivacyDetails">
-          <summary>What gets sent to Groq?</summary>
+          <summary>AI privacy details</summary>
           <div class="ai-detail-copy">
             <p>Your question, selected table schemas (table and column names and types), sample values from public
-              datasets, and other available table names are sent to Groq. If SQL fails, a retry also sends the DuckDB
+              datasets, and other available table names are sent to Groq (AI provider). If SQL fails, a retry also sends the DuckDB
               error, which may include SQL or data values. Generated SQL runs in your browser using DuckDB.</p>
             <p>Your API key is sent directly to Groq for authentication. This application does not record keys or
               questions in application logs. Groq handles requests under its

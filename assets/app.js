@@ -1211,7 +1211,7 @@ ${schemaText}`;
       }
 
       const errBody = lastRes ? await lastRes.text() : "Unknown error";
-      throw new Error(`Groq API error (HTTP ${lastRes?.status}): ${errBody}`);
+      throw new Error(`AI provider error (HTTP ${lastRes?.status}): ${errBody}`);
     }
 
     askAiBtn.addEventListener("click", async () => {
@@ -1236,7 +1236,7 @@ ${schemaText}`;
         if (!apiKey) {
           aiSettings.open = true;
           groqApiKeyInput.focus();
-          throw new Error("Enter a Groq API key in AI settings to create a report.");
+          throw new Error("Enter an API key in AI settings to create a report.");
         }
         aiSettings.open = groqStorageWarning;
 
