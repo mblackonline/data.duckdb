@@ -30,7 +30,7 @@ than opening `index.html` directly as a local file.
 Run the report, key-handling, CSV, and SQL-policy regression checks with:
 
 ```powershell
-node --test --test-reporter=dot tests/report-state.test.cjs tests/pagination.test.cjs tests/ai-report.test.cjs tests/api-key.test.cjs tests/csv-export.test.cjs tests/sql-policy.test.cjs
+node --test --test-reporter=dot tests/report-state.test.cjs tests/pagination.test.cjs tests/ai-report.test.cjs tests/api-key.test.cjs tests/csv-export.test.cjs tests/full-csv.test.cjs tests/sql-policy.test.cjs
 ```
 
 The optional `tests/accessibility-browser.cjs` and `tests/query-limits-wasm.cjs`
@@ -82,9 +82,33 @@ Queries without an explicit order use output-column ordering. For repeatable
 pages, specify a unique ordering in SQL. Each page is a fresh read, so changing
 source data or tied sort values can move rows between pages. Very expensive
 queries and oversized cells/pages still have resource safeguards and cancellation.
-Search applies to the current page, and CSV downloads currently contain only that
-page's loaded rows, including rows hidden by search. Full-report CSV export is a
-separate follow-up.
+Search applies to the current page. The single Download report (CSV) button
+downloads all matching report rows by rerunning the loaded SQL without the page
+wrapper or page search. SQL filters, aggregates, ordering,
+LIMIT and OFFSET remain effective, and unexecuted SQL editor changes are ignored.
+This is a fresh read, so source data may differ from the displayed page.
+
+Full exports stream through the same SQL policy and database watchdog. With
+`showSaveFilePicker` available, the browser writes awaited chunks to a chosen file
+without accumulating the entire CSV in JavaScript. The file is committed only
+after end-of-stream and successful query cleanup. Cancellation or failure aborts
+the writable stream; a newly created empty file may remain. A failure during final
+commit requires checking the destination because saving could not be confirmed.
+Browsers without that picker use a bounded 20 MiB Blob fallback, creating a
+download only after complete success. Larger fallback exports fail without a
+partial download. Full export has no total row/cell cap, but retains the 100-column,
+100,000-character cell, 5 MiB encoded-row and 30-second limits. Chunks target 256 KiB;
+a single safe row can exceed that target. The 256 MB engine buffer-manager limit
+is not a bound on total browser memory. Stop report terminates the database worker,
+aborts the export, and requires Reconnect. Starting another report or page cancels
+an export that has not begun final commit. Downloads use a UTF-8 BOM,
+formula-text protection and quoting; Excel identifier import still requires Text.
+
+`tests/full-csv-browser.cjs` accepts the temporary browser dependency prefix. It
+uses the actual pinned browser engine, public bus-stop data and an isolated
+in-memory fixture, plus real browser-owned filesystem writers. It checks full
+exports, SQL limits/aggregates, fallback downloads, large streaming and aborted
+file preservation. The native save dialog itself still needs a manual check.
 
 One-click table reports select explicit reporting columns. Geometry payloads are
 excluded from these presets because they are intended for maps and can exceed

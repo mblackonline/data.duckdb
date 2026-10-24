@@ -51,12 +51,22 @@ async function report(rows) {
 
 async function writeExcelFixture(outputPath) {
   const { h } = await report(fixtureRows);
-  h.export();
+  await download(h, fixtureRows);
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
   fs.writeFileSync(outputPath, Buffer.from(await h.downloads[0].arrayBuffer()));
 }
 
-module.exports = { writeExcelFixture };
+async function download(h, rows) {
+  const pending = h.export();
+  await new Promise(setImmediate);
+  h.queries.at(-1).resolve({
+    schema: { fields: Object.keys(rows[0]).map(name => ({ name })) },
+    numRows: rows.length, get: index => rows[index]
+  });
+  await pending;
+}
+
+module.exports = { writeExcelFixture, readCsv };
 
 if (require.main === module) {
 test("formula-like text and headers get a quoted protective tab, including whitespace and full-width prefixes", () => {
@@ -86,11 +96,11 @@ test("commas, quotes, CR, LF, CRLF, Unicode, blanks and identifiers survive an i
   assert.deepEqual(readCsv(csv), values.map((value, index) => [String(index), String(value ?? "")]));
 });
 
-test("the actual download has UTF-8 identification, safe headers, unchanged numeric values and all loaded rows", async () => {
+test("the report download has UTF-8 identification, safe headers, unchanged numbers and ignores page search", async () => {
   const { h, link } = await report(fixtureRows);
   h.filter("Ordinary text");
   assert.match(h.ui.resultsMeta.textContent, /1 displayed \/ 15 loaded/);
-  h.export();
+  await download(h, fixtureRows);
   const bytes = Buffer.from(await h.downloads[0].arrayBuffer());
   assert.deepEqual([...bytes.subarray(0, 3)], [0xef, 0xbb, 0xbf]);
   const expected = [
@@ -98,16 +108,17 @@ test("the actual download has UTF-8 identification, safe headers, unchanged nume
     ...cases.map(([label, text, id, protect]) => [label, protect ? `\t${text}` : text, id, "-85.3097", "1282571", "Protected header"])
   ];
   assert.deepEqual(readCsv(bytes), expected);
-  assert.match(h.ui.exportCsvBtn.textContent, /all 15 loaded rows/);
-  assert.match(link.download, /^carta_report_\d{4}-\d{2}-\d{2}\.csv$/);
+  assert.equal(h.ui.exportCsvBtn.textContent, "Download report (CSV)");
+  assert.match(link.download, /^carta_report_\d{4}-\d{2}-\d{2}_full\.csv$/);
   assert.equal(h.state().rows[6].Text, "=1+2", "CSV protection must not mutate displayed source data");
 });
 
-test("partial downloads keep the row cap and identify partial output in the filename", async () => {
-  const { h, link } = await report(Array.from({ length: 5001 }, (_, index) => ({ row: index })));
-  h.export();
-  assert.match(link.download, /^carta_report_\d{4}-\d{2}-\d{2}_partial\.csv$/);
-  assert.equal(readCsv(Buffer.from(await h.downloads[0].arrayBuffer())).length, 5001);
-  assert.match(h.ui.exportCsvBtn.textContent, /CSV, partial/);
+test("a capped display still downloads the full report without a partial filename", async () => {
+  const rows = Array.from({ length: 5001 }, (_, index) => ({ row: index }));
+  const { h, link } = await report(rows);
+  assert.equal(h.state().rows.length, 5000);
+  await download(h, rows);
+  assert.match(link.download, /^carta_report_\d{4}-\d{2}-\d{2}_full\.csv$/);
+  assert.equal(readCsv(Buffer.from(await h.downloads[0].arrayBuffer())).length, 5002);
 });
 }

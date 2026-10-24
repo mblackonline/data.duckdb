@@ -171,7 +171,7 @@
               style="width: 220px; max-width: 100%; padding: 0.45rem 0.65rem; font-size: 0.85rem;"
             />
           </div>
-          <button id="exportCsvBtn" class="btn btn-success" aria-describedby="csvExportHelp" disabled>Download this page (CSV)</button>
+          <button id="exportCsvBtn" class="btn btn-success" aria-describedby="fullCsvHelp csvExportHelp" disabled>Download report (CSV)</button>
           <button id="stopReportBtn" class="btn btn-secondary" disabled>Stop report</button>
           <button id="reconnectBtn" class="btn" hidden>Reconnect</button>
         </div>
@@ -201,6 +201,9 @@
         CSV exports add a protective tab before formula-like text for Excel. Plain numbers are unchanged.
         Import identifier columns as Text in Excel to preserve leading zeros and long IDs.
       </p>
+
+      <p id="fullCsvHelp" class="panel-subtitle">Downloads read source data again. Choose a CSV destination when prompted. Stop report cancels the download and requires Reconnect. Exports must finish within 30 seconds; browsers without direct file saving allow up to 20 MiB.</p>
+      <p id="csvExportStatus" class="panel-subtitle" role="status" aria-live="polite" aria-atomic="true"></p>
 
       <details class="sql-details">
         <summary>View or Edit SQL Query</summary>

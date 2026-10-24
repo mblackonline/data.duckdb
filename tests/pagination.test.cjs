@@ -67,19 +67,24 @@ test("empty, exact-size, and one-extra-row pages expose correct navigation", asy
   }
 });
 
-test("search and CSV use only the current page and exports identify the page", async () => {
+test("page search does not restrict the default report download", async () => {
   const h = harness(); const link = { click() {} };
   h.ui.document.createElement = () => link;
   const rows = Array.from({ length: 150 }, (_, id) => ({ id }));
   await open(h, rows);
   h.filter("149");
   assert.match(h.ui.resultsMeta.textContent, /0 displayed \/ 100 loaded rows on page 1/);
-  assert.match(h.ui.resultsScope.textContent, /CSV contains all loaded rows on this page/);
-  h.export();
+  assert.match(h.ui.resultsScope.textContent, /includes all rows matched by the report SQL/);
+  const download = h.export();
+  await new Promise(setImmediate);
+  assert(!/LIMIT \d+ OFFSET \d+$/.test(h.queries.at(-1).sql));
+  h.queries.at(-1).resolve(table(rows));
+  await download;
   const text = await h.downloads[0].text();
-  assert.equal(text.split("\r\n").length, 101);
-  assert(text.endsWith("\r\n99"));
-  assert.match(link.download, /_page_1\.csv$/);
+  assert.equal(text.trimEnd().split("\r\n").length, 151);
+  assert(text.endsWith("\r\n149\r\n"));
+  assert.match(link.download, /_full\.csv$/);
+  assert.equal(h.state().rows.length, 100);
   const next = h.next(); await respond(h, rows); await next;
   assert.match(h.ui.resultsMeta.textContent, /1 displayed \/ 50 loaded rows on page 2/);
 });

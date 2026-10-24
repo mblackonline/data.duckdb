@@ -30,6 +30,8 @@ function harness({ actualGenerator = false, storage = { getItem() { return null;
     context[name] = { value: "", textContent: "", innerHTML: "", disabled: false, hidden: false, style: {}, focus() {}, classList: { add() {}, remove() {} }, listeners: new Map(), querySelectorAll: () => [], addEventListener(type, fn) { this.listeners.set(type, fn); } };
   }
   const connections = [];
+  context.csvExportStatus = { textContent: "" };
+  context.exportCsvBtn.textContent = "Download report (CSV)";
   let terminated = 0, reloaded = 0;
   Object.assign(context, {
     mockConn: { query(sql) { const pending = deferred(); queries.push({ sql, ...pending }); return pending.promise; } },
@@ -148,7 +150,7 @@ test("a failed report cannot restore or export previous rows", async () => {
   assert.equal(h.state().report, null); assert.equal(h.downloads.length, 0);
   assert.equal(h.ui.tableContainer.innerHTML, errorTable);
   assert.equal(h.ui.errorBanner.textContent, "network unavailable");
-  assert.equal(h.ui.exportCsvBtn.textContent, "Download this page (CSV)");
+  assert.equal(h.ui.exportCsvBtn.textContent, "Download report (CSV)");
 });
 
 test("an old success cannot replace a newer report", async () => {
@@ -200,9 +202,9 @@ test("a failed current request cannot be replaced by an old successful result", 
   assert.equal(h.ui.errorBanner.textContent, "current error");
 });
 
-test("empty results and conversion failures leave no exportable data", async () => {
+test("empty reports remain downloadable, while conversion failures invalidate the report", async () => {
   const h = harness(); await load(h, "empty", []);
-  assert(h.ui.exportCsvBtn.disabled); assert(h.ui.quickSearchInput.disabled);
+  assert.equal(h.ui.exportCsvBtn.disabled, false); assert(h.ui.quickSearchInput.disabled);
   const pending = h.run("conversion failure");
   await new Promise(setImmediate);
   h.queries.at(-1).resolve({ schema: { fields: [{ name: "new" }] }, toArray() { throw Error("bad result"); } });
@@ -246,8 +248,12 @@ test("filter counts and CSV contents belong to the latest completed report", asy
   const h = harness(); await load(h, "latest", [{ stop: "Market" }, { stop: "Broad" }]);
   h.filter("Market");
   assert.match(h.ui.resultsMeta.textContent, /1 displayed \/ 2 loaded/);
-  h.export(); assert.equal(h.downloads.length, 1);
-  assert.equal(await h.downloads[0].text(), "stop\r\nMarket\r\nBroad");
+  const download = h.export();
+  await new Promise(setImmediate);
+  h.queries.at(-1).resolve(result([{ stop: "Market" }, { stop: "Broad" }]));
+  await download;
+  assert.equal(h.downloads.length, 1);
+  assert.equal(await h.downloads[0].text(), "stop\r\nMarket\r\nBroad\r\n");
 });
 
 test("superseded AI generation cannot execute SQL or restore old results", async () => {
@@ -308,13 +314,14 @@ test("superseded actual Groq generation does not try another model", async () =>
   assert.equal(h.apiCalls.length, 1); assert.equal(h.state().report.title, "preset");
 });
 
-test("output is capped at 5000 rows and partial CSV scope is explicit", async () => {
+test("display output is capped at 5000 rows while report download remains available", async () => {
   const h = harness();
   await load(h, "large report", Array.from({ length: 5001 }, (_, n) => ({ number: n })));
   assert.equal(h.state().rows.length, 5000);
   assert.equal(h.state().report.truncated, true);
   assert.match(h.ui.resultsScope.textContent, /Partial result.*5,000.*row limit/);
-  assert.match(h.ui.exportCsvBtn.textContent, /CSV, partial/);
+  assert.equal(h.ui.exportCsvBtn.disabled, false);
+  assert.equal(h.ui.exportCsvBtn.textContent, "Download report (CSV)");
   assert.match(h.ui.resultsMeta.textContent, /\[Partial result\]/);
   assert.equal(h.connections[0].cancelled, true);
   assert.equal(h.connections[0].closed, true);

@@ -137,7 +137,7 @@ async function main() {
     ]);
     assert.equal(current.h.state().report.truncated, false);
     assert.equal(current.h.state().report.page.hasMore, false);
-    current.h.export();
+    await current.h.export();
     const csv = await current.h.downloads.at(-1).text();
     assert.match(csv, /^id,name,color\r\n/);
     assert(csv.includes("Market Street"));

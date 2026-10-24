@@ -19,6 +19,8 @@
     const MAX_CELL_CHARACTERS = 100000;
     const REPORT_TIMEOUT_MS = 30000;
     const REPORT_PAGE_SIZES = Object.freeze([50, 100, 250, 500, 1000]);
+    const CSV_CHUNK_BYTES = 256 * 1024;
+    const CSV_FALLBACK_MAX_BYTES = 20 * 1024 * 1024;
 
     // Friendly descriptions for CARTA datasets
     const DATASET_INFO = {
@@ -164,6 +166,7 @@
     let duckdbWorker = null;
     let currentRequestTitle = "Report";
     const activeQueries = new Set();
+    let activeCsvExport = null;
 
     // DOM elements
     const dbStatusDot = document.getElementById("dbStatusDot");
@@ -184,6 +187,7 @@
     const errorBanner = document.getElementById("errorBanner");
     const tableContainer = document.getElementById("tableContainer");
     const exportCsvBtn = document.getElementById("exportCsvBtn");
+    const csvExportStatus = document.getElementById("csvExportStatus");
     const quickSearchInput = document.getElementById("quickSearchInput");
     const stopReportBtn = document.getElementById("stopReportBtn");
     const reconnectBtn = document.getElementById("reconnectBtn");
@@ -509,6 +513,7 @@
     }
 
     function stopReports(message = "Report stopped. Reconnect to run another report.") {
+      cancelFullCsvExport("Export stopped. Reconnect before trying again.", true);
       ++reportRequestId;
       activeAiRequestId = null;
       const worker = duckdbWorker;
@@ -580,7 +585,7 @@
       return { columns, rows, truncated: false, ...(page ? { hasMore: false } : {}) };
     }
 
-    async function runBoundedReport(sql, requestId, page = null) {
+    async function runBoundedReport(sql, requestId, page = null, consume = null) {
       const bindings = db;
       let reject;
       const stopped = new Promise((resolve, no) => { reject = no; });
@@ -597,14 +602,14 @@
           const parsed = await validateCartaSql(sql, queryConnection);
           if (requestId !== reportRequestId) return null;
           let executionSql = sql;
-          if (page) {
-            if (!Number.isSafeInteger(page.offset) || page.offset < 0 || !Number.isSafeInteger(page.size) || page.size < 1 || page.size > 1000 || !Number.isSafeInteger(page.offset + page.size + 1)) throw reportLimitError("Invalid report page.");
+          if (page || consume) {
+            if (page && (!Number.isSafeInteger(page.offset) || page.offset < 0 || !Number.isSafeInteger(page.size) || page.size < 1 || page.size > 1000 || !Number.isSafeInteger(page.offset + page.size + 1))) throw reportLimitError("Invalid report page.");
             const normalized = await normalizeReportSql(parsed, queryConnection, sql);
             if (requestId !== reportRequestId) return null;
-            executionSql = `SELECT * FROM (${normalized.sql}) AS "carta_page"${normalized.ordered ? "" : " ORDER BY ALL"} LIMIT ${page.size + 1} OFFSET ${page.offset}`;
+            executionSql = `SELECT * FROM (${normalized.sql}) AS "carta_page"${normalized.ordered ? "" : " ORDER BY ALL"}${page ? ` LIMIT ${page.size + 1} OFFSET ${page.offset}` : ""}`;
           }
           reader = await queryConnection.send(executionSql, true);
-          const result = await collectReportRows(reader, requestId, page);
+          const result = await (consume ? consume(reader) : collectReportRows(reader, requestId, page));
           complete = result !== null && !result.truncated && !result.hasMore;
           return result;
         } finally {
@@ -634,7 +639,6 @@
       currentReport = null;
       quickSearchInput.disabled = true;
       exportCsvBtn.disabled = true;
-      exportCsvBtn.textContent = "Download this page (CSV)";
       previousPageBtn.disabled = true;
       nextPageBtn.disabled = true;
       rowsPerPage.disabled = true;
@@ -642,6 +646,8 @@
     }
 
     function beginReportRequest(title, message = "Loading data from CARTA S3...") {
+      if (activeCsvExport) cancelFullCsvExport("Export canceled because another report or page was requested.");
+      else setCsvExportStatus("");
       const requestId = ++reportRequestId;
       currentRequestTitle = title;
       stopReportBtn.disabled = false;
@@ -716,7 +722,6 @@
       resultsFreshness.textContent = "Checking source timestamps...";
       resultsScope.textContent = "";
       tableContainer.innerHTML = `<div class="empty-state">Loading data from CARTA S3...</div>`;
-      exportCsvBtn.disabled = true;
 
       const t0 = performance.now();
       try {
@@ -726,15 +731,14 @@
 
         currentColumns = result.columns;
         currentRows = result.rows;
-        currentReport = { title, elapsedMs, truncated: result.truncated, ...(page ? {
-          querySql: sql, sourceTime, page: { ...page, hasMore: result.hasMore }
+        currentReport = { title, querySql: sql, sourceTime, elapsedMs, truncated: result.truncated, ...(page ? {
+          page: { ...page, hasMore: result.hasMore }
         } : {}) };
         resultsScope.textContent = page
-          ? `${result.truncated ? `Partial page: loaded ${result.rows.length} rows (${result.reason}); use Next to continue. ` : ""}Report SQL defines the matching rows. Browse them a page at a time. Search checks this page only; CSV contains all loaded rows on this page, including rows hidden by search. Source changes or tied sort values may shift rows between pages.`
+          ? `${result.truncated ? `Partial page: loaded ${result.rows.length} rows (${result.reason}); use Next to continue. ` : ""}Download report (CSV) includes all rows matched by the report SQL, including any SQL limits. Search checks this page only and does not change the download. Source changes or tied sort values may shift rows between reads.`
           : describeResultScope(rowLimit, result);
         resultsFreshness.textContent = `${describeSourceFreshness(currentRows, sourceTime)} Report retrieved: ${reportTimeFormatter.format(new Date())} (${REPORT_TIME_ZONE}).`;
-        exportCsvBtn.disabled = currentRows.length === 0;
-        exportCsvBtn.textContent = page ? `Download this page (CSV${result.truncated ? ", partial" : ""})` : `Download all ${currentRows.length.toLocaleString()} loaded rows (CSV${result.truncated ? ", partial" : ""})`;
+        exportCsvBtn.disabled = activeCsvExport !== null;
         quickSearchInput.disabled = currentRows.length === 0;
         if (page) {
           const number = page.previous.length + 1;
@@ -761,7 +765,7 @@
       const safety = result?.truncated
         ? `Partial result: output was truncated after ${result.rows.length.toLocaleString()} rows (${result.reason}). This is not a complete result. Narrow the report or select fewer columns.`
         : `Reports load at most ${MAX_RESULT_ROWS.toLocaleString()} rows and also have output-size limits.`;
-      return `${safety} ${scope} Search applies to loaded rows only. CSV downloads include all loaded rows, including rows hidden by the search.`;
+      return `${safety} ${scope} Search applies to loaded rows only. Download report (CSV) reruns the report SQL for all matching rows, including SQL limits, without the page search.`;
     }
 
     function parseSourceTime(value, format) {
@@ -859,22 +863,169 @@
 
     quickSearchInput.addEventListener("input", applyQuickFilter);
 
-    // Export current results to CSV
-    exportCsvBtn.addEventListener("click", () => {
-      if (!currentReport || exportCsvBtn.disabled || !currentRows.length) return;
-      const csvLines = [
-        currentColumns.map((col) => csvEscape(col, true)).join(","),
-        ...currentRows.map((row) => currentColumns.map((col) => csvEscape(row[col])).join(","))
-      ];
-      // Excel recognizes UTF-8 reliably when the file starts with its byte-order mark.
-      const blob = new Blob(["\uFEFF", csvLines.join("\r\n")], { type: "text/csv;charset=utf-8;" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `carta_report_${new Date().toISOString().slice(0, 10)}${currentReport.page ? `_page_${currentReport.page.previous.length + 1}` : ""}${currentReport.truncated ? "_partial" : ""}.csv`;
-      a.click();
-      URL.revokeObjectURL(url);
+    function setCsvExportStatus(message, error = false) {
+      csvExportStatus.textContent = message;
+      csvExportStatus.className = error ? "panel-subtitle csv-export-error" : "panel-subtitle";
+    }
+
+    function abortCsvWriter(operation) {
+      if (!operation.writer || operation.aborting) return;
+      // Stop must remain responsive even if the filesystem is stalled.
+      operation.aborting = true;
+      Promise.resolve().then(() => operation.writer.abort()).catch(() => {
+        if (activeCsvExport === operation) setCsvExportStatus("Export did not complete. Check the destination file before using it; the browser could not confirm cancellation.", true);
+      });
+    }
+
+    function cancelFullCsvExport(message, stopped = false) {
+      const operation = activeCsvExport;
+      if (!operation) return;
+      if (operation.committing) {
+        setCsvExportStatus("The complete CSV was being finalized. Check the destination; saving could not be confirmed.", true);
+        if (stopped) abortCsvWriter(operation);
+        return;
+      }
+      operation.canceled = true;
+      setCsvExportStatus(`${message} No completed CSV was saved; a new empty file may remain.`, true);
+      abortCsvWriter(operation);
+    }
+
+    exportCsvBtn.addEventListener("click", async () => {
+      if (!conn || !currentReport || exportCsvBtn.disabled || activeCsvExport) return;
+      const report = currentReport;
+      const requestId = reportRequestId;
+      const restoreFocus = document.activeElement === exportCsvBtn;
+      const filename = `carta_report_${new Date().toISOString().slice(0, 10)}_full.csv`;
+      const operation = { canceled: false, committing: false, writer: null, timer: null, reject: null };
+      const stopped = new Promise((resolve, reject) => { operation.reject = reject; });
+      activeCsvExport = operation;
+      activeQueries.add(operation);
+      exportCsvBtn.disabled = true;
+      stopReportBtn.disabled = false;
+      setCsvExportStatus("Choose a CSV destination. The full report uses the loaded report SQL, without the page search.");
+      const checkActive = () => {
+        if (operation.canceled || requestId !== reportRequestId || !conn) {
+          const error = new Error("Export canceled.");
+          error.code = "CSV_CANCELED";
+          throw error;
+        }
+      };
+      const work = (async () => {
+        let saved = false;
+        try {
+          // Invoke the picker before any await to retain the click's user activation.
+          const handle = typeof globalThis.showSaveFilePicker === "function"
+            ? await globalThis.showSaveFilePicker({ suggestedName: filename, types: [{ description: "CSV report", accept: { "text/csv": [".csv"] } }] })
+            : null;
+          checkActive();
+          operation.timer = setTimeout(() => stopReports("CSV export stopped after 30 seconds. Reconnect, then narrow the report."), REPORT_TIMEOUT_MS);
+          if (handle) {
+            operation.writer = await handle.createWritable();
+            checkActive();
+          }
+          const chunks = [];
+          let bytes = 0;
+          const write = async (chunk) => {
+            checkActive();
+            if (operation.writer) await operation.writer.write(chunk);
+            else {
+              if (bytes + chunk.byteLength > CSV_FALLBACK_MAX_BYTES) throw reportLimitError("This browser's full CSV download exceeds 20 MiB. Use Chrome or Edge with file saving enabled, or narrow the report. No download was created.");
+              chunks.push(chunk);
+            }
+            bytes += chunk.byteLength;
+            checkActive();
+          };
+          setCsvExportStatus(`Exporting ${report.title}: 0 rows. Stop report cancels the export.${handle ? "" : " This browser buffers at most 20 MiB."}`);
+          const result = await runBoundedReport(report.querySql, requestId, null, reader => streamFullCsv(reader, write, checkActive, report.title));
+          checkActive();
+          if (!result) throw new Error("Export did not complete.");
+          // Publish only after end-of-stream AND successful database cleanup.
+          operation.committing = true;
+          setCsvExportStatus(`Finalizing complete CSV for ${report.title}...`);
+          if (operation.writer) await operation.writer.close();
+          else {
+            const blob = new Blob(chunks, { type: "text/csv;charset=utf-8;" });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = filename;
+            link.click();
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+          }
+          saved = true;
+          if (requestId === reportRequestId) setCsvExportStatus(`${handle ? "Saved" : "Download ready for"} ${report.title}: ${result.count.toLocaleString()} rows, ${bytes.toLocaleString()} bytes. Full SQL result from a fresh read; SQL limits apply. Page search was not applied.`);
+        } finally {
+          // Never close a failed/aborted stream and publish a partial CSV.
+          if (!saved) abortCsvWriter(operation);
+        }
+      })();
+      try {
+        await Promise.race([work, stopped]);
+      } catch (error) {
+        if (!operation.canceled && requestId === reportRequestId) {
+          setCsvExportStatus(error.name === "AbortError"
+            ? "Export canceled. No completed CSV was saved; a new empty file may remain."
+            : `Export failed. Check the destination before using it; no successful save was confirmed. ${error.message || error}`, true);
+        }
+      } finally {
+        clearTimeout(operation.timer);
+        activeQueries.delete(operation);
+        if (activeCsvExport === operation) activeCsvExport = null;
+        exportCsvBtn.disabled = !conn || !currentReport;
+        if (restoreFocus && requestId === reportRequestId && !exportCsvBtn.disabled &&
+            (document.activeElement === document.body || document.activeElement === exportCsvBtn)) exportCsvBtn.focus();
+        if (!activeQueries.size && activeAiRequestId === null) stopReportBtn.disabled = true;
+      }
     });
+
+    async function streamFullCsv(reader, write, checkActive, title) {
+      await reader.open();
+      checkActive();
+      const columns = reader.schema.fields.map(field => field.name);
+      if (!columns.length || columns.length > MAX_RESULT_COLUMNS) throw reportLimitError("This report has too many columns or no columns. Select up to 100 columns and try again.");
+      const encoder = new TextEncoder();
+      let parts = ["\uFEFF"], chunkBytes = 3, count = 0;
+      const flush = async () => {
+        if (!parts.length) return;
+        await write(encoder.encode(parts.join("")));
+        parts = [];
+        chunkBytes = 0;
+        setCsvExportStatus(`Exporting ${title}: ${count.toLocaleString()} rows written. Stop report cancels the export.`);
+        await new Promise(resolve => setTimeout(resolve, 0));
+        checkActive();
+      };
+      const append = async (values, header = false) => {
+        const cells = [];
+        for (const value of values) {
+          if ((typeof value === "string" && value.length > MAX_CELL_CHARACTERS) ||
+              (value && typeof value === "object" && (value.byteLength > MAX_CELL_CHARACTERS || value.length > MAX_CELL_CHARACTERS))) throw reportLimitError("A CSV cell is too large. Select fewer fields or narrow the report.");
+          const text = formatCellValue(value);
+          if (text.length > MAX_CELL_CHARACTERS) throw reportLimitError("A CSV cell is too large. Select fewer fields or narrow the report.");
+          cells.push(csvEscape(text, header));
+        }
+        const line = cells.join(",") + "\r\n";
+        const size = encoder.encode(line).byteLength;
+        if (size > MAX_RESULT_BYTES) throw reportLimitError("A CSV row is too large. Select fewer fields or narrow the report.");
+        if (chunkBytes + size > CSV_CHUNK_BYTES) await flush();
+        parts.push(line);
+        chunkBytes += size;
+      };
+      await append(columns, true);
+      for await (const batch of reader) {
+        checkActive();
+        for (let index = 0; index < batch.numRows; index++) {
+          const row = batch.get(index);
+          await append(columns.map(column => row[column]));
+          count++;
+          if (chunkBytes >= CSV_CHUNK_BYTES) await flush();
+        }
+        // Bound chunk metadata as well as bytes when the source emits tiny batches.
+        await new Promise(resolve => setTimeout(resolve, 0));
+        checkActive();
+      }
+      await flush();
+      return { count, truncated: false };
+    }
 
     function csvEscape(val, isHeader = false) {
       let str = String(val ?? "");
