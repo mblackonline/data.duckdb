@@ -968,27 +968,79 @@
       return bestView;
     }
 
-    const sampleCache = {}; // viewName -> string summary of 1 sample row
+    function findStandardReport(question) {
+      // Only exact, unqualified browsing requests use presets. Filters, totals,
+      // calculations and other additional words must keep their original meaning.
+      const normalize = value => value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+      const requested = normalize(question)
+        .replace(/^please /, "")
+        .replace(/^(?:show|list|browse|display)(?: me)? (?:all )?(?:the )?/, "")
+        .replace(/ please$/, "");
+      const aliases = {
+        gtfsrt_vehicle_positions_v1: ["bus vehicle positions", "vehicle positions"],
+        clever_vehicle_locations_v1: ["clever locations"],
+        clever_predictions_v1: ["stop predictions", "clever stop predictions"],
+        gtfsrt_trip_updates_v1: ["trip updates", "carta trip updates", "trip updates and delays", "carta trip updates and delays"],
+        simple_bus_routes: ["bus routes", "carta routes", "routes"],
+        simple_bus_stops: ["bus stops", "carta stops", "stops"],
+        ntd_monthly_ridership_v1: ["carta monthly ridership", "ntd monthly ridership"],
+        bike_chattanooga_stations_v1: ["bike stations", "bike chattanooga stations"]
+      };
+      return PRESET_REPORTS.find(report => {
+        const view = report.sql.match(/FROM data\.(\w+)/i)[1];
+        return availableViews.includes(view) && [report.title, `CARTA ${report.title}`, view, ...(aliases[view] || [])]
+          .some(name => normalize(name) === requested);
+      }) || null;
+    }
+
+    const sampleCache = {}; // viewName -> bounded samples, prioritizing temporal fields
+    // Materialize parsed epochs before arithmetic: the pinned Wasm engine can
+    // fail on the combined inline expression when input columns contain NULLs.
+    const TRIP_ELAPSED_SQL = `WITH parsed AS MATERIALIZED (
+  SELECT "trip_id",
+    epoch(TRY_CAST("predicted_arrival_time" AS TIMESTAMPTZ)) AS start_seconds,
+    epoch(TRY_CAST("predicted_departure_time" AS TIMESTAMPTZ)) AS end_seconds
+  FROM data.gtfsrt_trip_updates_v1
+)
+SELECT "trip_id", (end_seconds - start_seconds) / 60.0 AS elapsed_minutes
+FROM parsed ORDER BY "trip_id";`;
+    const DATASET_TIME_GUIDANCE = {
+      gtfsrt_trip_updates_v1: `scheduled_arrival_time, scheduled_departure_time and trip_start_time are GTFS service-day clock strings, e.g. 19:35:57, potentially with hours >= 24. predicted_arrival_time and predicted_departure_time are full ISO timestamps with offsets, e.g. 2026-08-18T19:51:00-04:00; parse with TRY_CAST(column AS TIMESTAMPTZ), without adding a date. There is no confirmed service date or observation timestamp in this table. service_id is a schedule identifier, not a date. Do not infer the service date from a prediction date, today's date, or 1970-01-01. A reliable scheduled-versus-predicted delay needs a confirmed service date and agency timezone; if asked to calculate that delay from this table alone, output MISSING_TIME_CONTEXT. For a request to show trip updates/delays, return the published fields without calculating a delay.`,
+      scheduled_stop_times_v1: "stop_arrival_time, stop_departure_time, trip_start_time and trip_end_time are GTFS service-day clock strings. Hours can exceed 23; do not CAST them AS TIME or parse as calendar timestamps. service_id is not a service date. A calendar comparison requires a confirmed service date and agency timezone, including GTFS daylight-saving rules.",
+      gtfsrt_vehicle_positions_v1: "timestamp is Unix epoch seconds; zero means unknown. Use to_timestamp(NULLIF(timestamp, 0)) for an instant. trip_start_date is a service date, not an observation timestamp.",
+      clever_vehicle_locations_v1: "timestamp is an ISO timestamp; preserve any supplied timezone offset and use TRY_CAST for malformed values. Scheduled clock fields do not independently establish observation freshness.",
+      clever_predictions_v1: "tmstmp is the prediction batch observation time and prdtm is the predicted event time, both local strings in YYYYMMDD HH:MM format. Use try_strptime(column, '%Y%m%d %H:%M'). Predicted times do not establish source freshness.",
+      bike_chattanooga_stations_v1: "last_updated and last_reported are Unix epoch seconds; parse with to_timestamp, treating zero as unknown."
+    };
 
     async function getSampleRowForView(viewName) {
       if (sampleCache[viewName] !== undefined) {
         return sampleCache[viewName];
       }
       try {
-        const res = await conn.query(`SELECT * FROM data.${viewName} LIMIT 1;`);
+        const columns = await getColumnsForView(viewName);
+        const scalar = columns.filter(column => !/GEOMETRY|BLOB|STRUCT|\[|MAP\(|UNION\(/i.test(column.type));
+        const temporal = column => /time|date|tmstmp|prdtm|last_reported|last_updated/i.test(column.name);
+        const chosen = [...scalar.filter(temporal), ...scalar.filter(column => !temporal(column))].slice(0, 24);
+        if (!chosen.length) return "";
+        // Bound values inside DuckDB, before transferring them into JavaScript.
+        // Three rows can reveal nulls/format variation without sampling payloads.
+        const projection = chosen.map(({ name }) => {
+          const quoted = '"' + name.replace(/"/g, '""') + '"';
+          return `LEFT(CAST(${quoted} AS VARCHAR), 97) AS ${quoted}`;
+        }).join(", ");
+        const res = await conn.query(`SELECT ${projection} FROM data.${viewName} LIMIT 3;`);
         const rows = res.toArray();
         if (!rows.length) {
           sampleCache[viewName] = "";
           return "";
         }
-        const row = rows[0];
         const fields = res.schema.fields.map((f) => f.name);
-        const pairs = fields.slice(0, 12).map((col) => {
+        sampleCache[viewName] = rows.map((row, index) => `row ${index + 1}: ` + fields.map(col => {
+          if (row[col] === null || row[col] === undefined) return `"${col}"=null`;
           const val = formatCellValue(row[col]);
-          const shortVal = val.length > 32 ? `${val.slice(0, 32)}...` : val;
-          return `"${col}"=${JSON.stringify(shortVal)}`;
-        });
-        sampleCache[viewName] = pairs.join(", ");
+          return `"${col}"=${JSON.stringify(val.length > 96 ? `${val.slice(0, 96)}...[truncated]` : val)}`;
+        }).join(", ")).join("\n  ");
         return sampleCache[viewName];
       } catch {
         sampleCache[viewName] = "";
@@ -1001,7 +1053,7 @@
       const primaryView = matchBestView(question);
       const selected = new Set([primaryView]);
 
-      // Add up to 2 additional related views so token usage stays around ~300 tokens/query
+      // Include up to two related schemas; samples are bounded separately.
       for (const v of availableViews) {
         if (selected.size >= 3) break;
         const kws = VIEW_KEYWORDS[v] || [];
@@ -1017,8 +1069,10 @@
           const colStr = cols.map((c) => `"${c.name}" (${c.type})`).join(", ");
           const sampleStr = await getSampleRowForView(v);
           lines.push(`Table data.${v}: ${colStr}`);
+          if (DATASET_TIME_GUIDANCE[v]) lines.push(`  Time semantics: ${DATASET_TIME_GUIDANCE[v]}`);
+          if (v === "gtfsrt_trip_updates_v1") lines.push(`  Verified pattern for requested elapsed minutes between two predicted instants (not scheduled-versus-predicted delay; only use when explicitly requested):\n${TRIP_ELAPSED_SQL}`);
           if (sampleStr) {
-            lines.push(`  Sample row for data.${v}: ${sampleStr}`);
+            lines.push(`  Sample rows for data.${v}: ${sampleStr}`);
           }
         } catch {
           lines.push(`Table data.${v}`);
@@ -1042,6 +1096,9 @@
       }
       if (/^UNSUPPORTED_QUERY\b/i.test(cleaned)) {
         return "UNSUPPORTED_QUERY";
+      }
+      if (/^MISSING_TIME_CONTEXT\b/i.test(cleaned)) {
+        throw new Error("A reliable delay calculation needs a confirmed service date and timezone. This trip-update dataset contains scheduled clock times and dated predictions, but no confirmed service date. Ask to show trip updates to view the published times.");
       }
       const selectIdx = cleaned.search(/\b(SELECT|WITH)\b/i);
       if (selectIdx > 0) {
@@ -1249,12 +1306,15 @@ Rules:
    - The "Mode" column uses 2-letter NTD codes: 'MB' (Motor Bus), 'DR' (Demand Response / Paratransit), 'IP' (Inclined Plane). The "3 Mode" column uses 'Bus' or 'Demand Response'.
 4. Do not add LIMIT unless the user explicitly requests a fixed number of records or a top/bottom list. The application paginates results separately; it does not need a preview LIMIT. Use a deterministic ORDER BY where practical.
 5. STRICT GUARDRAIL: Every query MUST include a FROM data.<table_name> clause referencing one of the tables in Schema. Never output a SELECT with only literal strings/numbers to answer general knowledge, coding, or non-CARTA questions. If the user's request is not about querying the CARTA tables listed in Schema, output the single word: UNSUPPORTED_QUERY
+6. Match the requested task. A request to show/list/browse a dataset must return its published reporting fields, excluding geometry, without inventing delay calculations, metrics, aggregations or extra filters. Calculate a metric only when explicitly requested.
+7. Follow the per-table time semantics below. Never prepend a date to a full ISO timestamp. Never subtract TIMESTAMP from TIMESTAMPTZ or compare unrelated service days. For full dated timestamps with offsets, use TRY_CAST(column AS TIMESTAMPTZ) on both operands. In this pinned Wasm engine, compute epoch values in a MATERIALIZED CTE first, then calculate (end_seconds - start_seconds) / 60.0 in the outer query; do not inline both epoch/TRY_CAST expressions into the subtraction. Do not multiply an INTERVAL by 1440 or assume that executing a query proves its date semantics. For malformed or missing inputs, preserve NULL rather than fabricating zero delay.
+8. GTFS service-day clocks can exceed 24:00:00. They are durations from the service-day origin, not standalone timestamps. To compare clock durations on a confirmed common service day, convert hours/minutes/seconds numerically; calendar comparisons also require a confirmed service date and agency timezone. If required time context is unavailable, output only MISSING_TIME_CONTEXT instead of guessing a date or returning an invented calculation.
 
 Schema:
 ${schemaText}`;
 
       const userPrompt = retryError
-        ? `Question: ${question}\nPrevious SQL failed in DuckDB with error: ${retryError}\nFix the DuckDB SQL query using only the exact column names listed in Schema.`
+        ? `Question: ${question}\nPrevious SQL failed in DuckDB with error: ${retryError}\nFix the DuckDB SQL query using only the exact column names listed in Schema. Preserve the original requested task and follow the time semantics; do not fix type errors by inventing dates or discarding timezone offsets. If required time context is unavailable, output MISSING_TIME_CONTEXT.`
         : question;
 
       const selectedModel = GROQ_MODELS.includes(groqModelSelect.value)
@@ -1307,6 +1367,14 @@ ${schemaText}`;
           throw new Error(
             "Only questions about CARTA datasets (bus routes, stops, vehicle locations, predictions, trip delays, ridership, bike stations, parcels, or addresses) are supported."
           );
+        }
+
+        const standardReport = findStandardReport(question);
+        if (standardReport) {
+          aiStatusText.textContent = "Loading standard report...";
+          await executePagedQuery(standardReport.sql, standardReport.title, standardReport.sourceTime, requestId);
+          if (requestId === reportRequestId) aiStatusText.textContent = "Report ready (standard report; no AI request).";
+          return;
         }
 
         if (!apiKey) {

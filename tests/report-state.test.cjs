@@ -60,6 +60,7 @@ function harness({ actualGenerator = false, storage = { getItem() { return null;
     GROQ_MODELS: ["openai/gpt-oss-120b", "openai/gpt-oss-20b"],
     CARTA_NTD_ID: "40001",
     isOffTopicQuestion: () => false,
+    findStandardReport: () => null,
     validateCartaSql() {},
     normalizeReportSql: async (parsed, connection, sql) => ({ sql, ordered: true }),
     buildGroqSchemaPrompt: async () => "Table data.simple_bus_routes: name VARCHAR",

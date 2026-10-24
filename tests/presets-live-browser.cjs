@@ -44,6 +44,7 @@ async function main() {
     await page.locator("#rowsPerPage").selectOption("1000");
     const presets = await page.evaluate(() => presetCheck.presets);
     assert.equal(presets.length, 8);
+    let tripUpdateCount = 0;
     for (const [index, preset] of presets.entries()) {
       await page.locator(".preset-card").nth(index).click();
       await page.waitForFunction(title => presetCheck.snapshot.report?.title === title || document.querySelector("#resultsMeta").textContent === `${title}: Error`, preset.title, { timeout: 40000 });
@@ -63,6 +64,7 @@ async function main() {
       assert.deepEqual(snapshot.columns, reference.columns, `${preset.title} retains all non-geometry fields`);
       assert.equal(snapshot.rows.length, Math.min(1000, reference.count), preset.title);
       assert.equal(snapshot.report.page.hasMore, reference.count > 1000, preset.title);
+      if (preset.title === "Trip Updates & Delays (GTFS-RT)") tripUpdateCount = reference.count;
       if (preset.title === "CARTA Bus Routes") {
         const expected = await page.evaluate(async () => {
           const rows = await presetCheck.conn.query('SELECT id, name, color FROM data.simple_bus_routes ORDER BY id');
@@ -81,6 +83,16 @@ async function main() {
       }
       console.log(`PASS: ${preset.title}: ${snapshot.rows.length}/${reference.count} rows, ${snapshot.columns.length} columns, no truncation or report error`);
     }
+    await page.locator("#tab-ai").click();
+    await page.locator("#aiQuestionInput").fill("Show CARTA Trip Updates & Delays (GTFS-RT)");
+    await page.locator("#askAiBtn").click();
+    await page.getByText("Report ready (standard report; no AI request).", { exact: true }).waitFor();
+    const standard = await page.evaluate(() => presetCheck.snapshot);
+    assert.equal(standard.rows.length, Math.min(1000, tripUpdateCount));
+    assert.equal(standard.report.truncated, false);
+    assert.equal(await page.locator("#groqApiKeyInput").inputValue(), "");
+    assert(!standard.columns.includes("delay_minutes"));
+    console.log("PASS: The exact AI browsing request loads live trip updates using the standard query without an API key");
     assert.deepEqual(errors, [], "No unhandled browser errors");
     console.log("PASS: All eight actual one-click presets load through the pinned browser engine and public catalog; route values and stop paging verified");
   } finally {

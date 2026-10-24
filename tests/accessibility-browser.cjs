@@ -234,6 +234,11 @@ async function main() {
     assert.equal(await focusedId(), "groqApiKeyInput");
     assert.equal(aiRequests, 0);
     assert.equal(await settings.evaluate(element => element.open), true);
+    await question.fill("Show CARTA Bus Routes");
+    await create.click();
+    await page.getByText("Report ready (standard report; no AI request).", { exact: true }).waitFor();
+    assert.equal(aiRequests, 0, "Exact standard browsing requests do not need an AI call or key");
+    assert.equal(await page.getByLabel("API key for Groq (AI provider)", { exact: true }).inputValue(), "");
     await page.getByLabel("API key for Groq (AI provider)", { exact: true }).fill("gsk_browser_fixture_only");
     await page.getByRole("button", { name: "Remember on this device", exact: true }).click();
     await page.reload();
@@ -252,7 +257,7 @@ async function main() {
     assert(await page.getByText(/Your question, selected table schemas/).isVisible());
     await page.keyboard.press("Enter");
     assert(await page.locator("#aiPrivacyWarning").isVisible());
-    await question.fill("List CARTA routes");
+    await question.fill("List CARTA routes sorted by name");
     await page.keyboard.press("Shift+Enter");
     assert((await question.inputValue()).includes("\n"));
     await question.dispatchEvent("keydown", { key: "Enter", isComposing: true });

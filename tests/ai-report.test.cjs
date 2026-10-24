@@ -1,0 +1,135 @@
+const test = require("node:test");
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
+const vm = require("node:vm");
+const { harness } = require("./report-state.test.cjs");
+const source = fs.readFileSync(path.join(__dirname, "..", "assets", "app.js"), "utf8");
+function section(start, end) { return source.slice(source.indexOf(start), source.indexOf(end, source.indexOf(start))); }
+function table(rows) { return { schema: { fields: Object.keys(rows[0] || {}).map(name => ({ name })) }, numRows: rows.length, get: index => rows[index], toArray: () => rows }; }
+function setup(options) {
+  const h = harness(options);
+  h.ui.VIEW_KEYWORDS = {};
+  h.ui.matchBestView = () => "gtfsrt_trip_updates_v1";
+  h.ui.getColumnsForView = async () => [
+    ...Array.from({ length: 15 }, (_, index) => ({ name: `field_${index}`, type: "VARCHAR" })),
+    { name: "scheduled_arrival_time", type: "VARCHAR" },
+    { name: "predicted_arrival_time", type: "VARCHAR" },
+    { name: "geometry", type: "GEOMETRY" }, { name: "payload", type: "BLOB" }
+  ];
+  vm.runInContext([
+    section("    const PRESET_REPORTS", "    // State"),
+    'availableViews = PRESET_REPORTS.map(report => report.sql.match(/FROM data\\.(\\w+)/i)[1]);',
+    section("    function findStandardReport(", "    function isOffTopicQuestion(")
+  ].join("\n"), h.ui);
+  return h;
+}
+
+test("unqualified standard report requests use exact tested queries without swallowing extra requirements", () => {
+  const h = setup();
+  for (const title of ["Latest Bus Vehicle Positions", "Clever Vehicle Locations", "Stop Predictions (Clever)", "Trip Updates & Delays (GTFS-RT)", "CARTA Bus Routes", "CARTA Bus Stops", "CARTA Monthly Ridership (NTD)", "Bike Chattanooga Stations"]) {
+    assert.equal(h.ui.findStandardReport(`Please show me the ${title}.`).title, title);
+  }
+  assert.equal(h.ui.findStandardReport("Show CARTA Trip Updates & Delays (GTFS-RT)").title, "Trip Updates & Delays (GTFS-RT)");
+  assert.equal(h.ui.findStandardReport("List all trip updates and delays").title, "Trip Updates & Delays (GTFS-RT)");
+  for (const question of ["Show trip updates for route 4", "Calculate trip delay minutes", "Count CARTA bus routes", "Show the top 5 bus stops", "Show bus stops on Market", "List CARTA routes sorted by name", "Show bus stops and bike stations"]) {
+    assert.equal(h.ui.findStandardReport(question), null, question);
+  }
+  vm.runInContext("availableViews = ['simple_bus_routes'];", h.ui);
+  assert.equal(h.ui.findStandardReport("Show trip updates"), null);
+});
+
+test("the screenshot browsing request succeeds without an API key, AI calculation or request", async () => {
+  const h = setup();
+  h.ui.groqApiKeyInput.value = "";
+  h.ui.aiQuestionInput.value = "Show CARTA Trip Updates & Delays (GTFS-RT)";
+  const pending = h.ask();
+  await new Promise(setImmediate);
+  assert.equal(h.generations.length, 0);
+  assert.equal(h.apiCalls.length, 0);
+  assert.match(h.queries[0].sql, /"scheduled_arrival_time"/);
+  assert(!/strptime|1970|delay_minutes|geometry/.test(h.queries[0].sql));
+  const row = { scheduled_arrival_time: "19:35:57", predicted_arrival_time: "2026-08-18T19:51:00-04:00" };
+  h.queries[0].resolve(table([row]));
+  await pending;
+  assert.deepEqual(h.state().rows, [row]);
+  assert.equal(h.state().report.title, "Trip Updates & Delays (GTFS-RT)");
+  assert.match(h.ui.aiStatusText.textContent, /standard report; no AI request/);
+  assert.match(h.ui.resultsFreshness.textContent, /no observation timestamp/);
+});
+
+test("standard report requests still yield to a newer report", async () => {
+  const h = setup(); h.ui.aiQuestionInput.value = "Show trip updates";
+  const old = h.ask(); await new Promise(setImmediate);
+  const current = h.run("newer report"); await new Promise(setImmediate);
+  h.queries[1].resolve(table([{ id: "new" }])); await current;
+  h.queries[0].resolve(table([{ id: "old" }])); await old;
+  assert.deepEqual(h.state().rows, [{ id: "new" }]);
+  assert.equal(h.state().report.title, "newer report");
+});
+
+test("samples include late-positioned time fields, complete offsets and nulls, with bounded scalar projection", async () => {
+  const h = setup(); const queries = [];
+  h.ui.mockConn.query = async sql => {
+    queries.push(sql);
+    return table([
+      { scheduled_arrival_time: null, predicted_arrival_time: null, field_0: "x".repeat(97) },
+      { scheduled_arrival_time: "25:10:00", predicted_arrival_time: "2026-08-19T01:15:00-04:00", field_0: "public" }
+    ]);
+  };
+  const samples = await h.ui.getSampleRowForView("gtfsrt_trip_updates_v1");
+  assert.match(samples, /"scheduled_arrival_time"=null/);
+  assert.match(samples, /25:10:00/);
+  assert.match(samples, /2026-08-19T01:15:00-04:00/);
+  assert.match(samples, /\[truncated\]/);
+  assert.equal(queries.length, 1);
+  assert.match(queries[0], /^SELECT LEFT\(CAST\("scheduled_arrival_time"/);
+  assert.match(queries[0], /, 97\).*LIMIT 3;/);
+  assert(!/SELECT \*|geometry|payload/.test(queries[0]));
+  assert.equal(await h.ui.getSampleRowForView("gtfsrt_trip_updates_v1"), samples);
+  assert.equal(queries.length, 1, "Bounded samples are cached");
+});
+
+test("time semantics remain in the schema context when sample retrieval fails", async () => {
+  const h = setup(); h.ui.mockConn.query = async () => { throw Error("No sample"); };
+  const prompt = await h.ui.buildGroqSchemaPrompt("Compare trip arrival times");
+  assert.match(prompt, /no confirmed service date/i);
+  assert.match(prompt, /hours >= 24/);
+  assert.match(prompt, /MISSING_TIME_CONTEXT/);
+});
+
+test("initial and correction prompts preserve requested tasks and explicit time semantics", async () => {
+  const h = setup({ actualGenerator: true }); const calls = [];
+  h.ui.mockConn.query = async () => table([{ scheduled_arrival_time: "19:35:57", predicted_arrival_time: "2026-08-18T19:51:00-04:00" }]);
+  h.ui.callGroqChat = async (key, model, system, user) => {
+    calls.push({ system, user });
+    return { ok: true, json: async () => ({ choices: [{ message: { content: 'SELECT "predicted_arrival_time" FROM data.gtfsrt_trip_updates_v1' } }] }) };
+  };
+  await h.ui.generateSqlWithGroq("mock-key", "Show predicted arrival timestamps");
+  await h.ui.generateSqlWithGroq("mock-key", "Show predicted arrival timestamps", "invalid timestamp");
+  for (const call of calls) {
+    assert.match(call.system, /without inventing delay calculations/);
+    assert.match(call.system, /Never prepend a date to a full ISO timestamp/);
+    assert.match(call.system, /TRY_CAST\(column AS TIMESTAMPTZ\)/);
+    assert.match(call.system, /\/ 60\.0/);
+    assert.match(call.system, /no confirmed service date/i);
+    assert.match(call.system, /2026-08-18T19:51:00-04:00/);
+  }
+  assert.match(calls[1].user, /do not fix type errors by inventing dates or discarding timezone offsets/);
+});
+
+test("missing time context becomes an actionable message before SQL execution or another API attempt", async () => {
+  const h = setup({ actualGenerator: true });
+  h.ui.mockConn.query = async () => table([{ scheduled_arrival_time: "19:35:57", predicted_arrival_time: "2026-08-18T19:51:00-04:00" }]);
+  for (const response of ["MISSING_TIME_CONTEXT", "```sql\nMISSING_TIME_CONTEXT\n```", "<think>Missing service day</think>MISSING_TIME_CONTEXT"]) {
+    assert.throws(() => h.ui.extractSql(response), /confirmed service date and timezone/);
+  }
+  h.ui.aiQuestionInput.value = "Calculate arrival delay minutes from trip updates";
+  const pending = h.ask(); await new Promise(setImmediate);
+  h.apiCalls[0].resolve({ ok: true, json: async () => ({ choices: [{ message: { content: "MISSING_TIME_CONTEXT" } }] }) });
+  await pending;
+  assert.equal(h.apiCalls.length, 1);
+  assert.equal(h.queries.length, 0);
+  assert.match(h.ui.errorBanner.textContent, /Ask to show trip updates/);
+  assert.equal(h.ui.exportCsvBtn.disabled, true);
+});

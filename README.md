@@ -30,7 +30,7 @@ than opening `index.html` directly as a local file.
 Run the report, key-handling, CSV, and SQL-policy regression checks with:
 
 ```powershell
-node --test --test-reporter=dot tests/report-state.test.cjs tests/pagination.test.cjs tests/api-key.test.cjs tests/csv-export.test.cjs tests/sql-policy.test.cjs
+node --test --test-reporter=dot tests/report-state.test.cjs tests/pagination.test.cjs tests/ai-report.test.cjs tests/api-key.test.cjs tests/csv-export.test.cjs tests/sql-policy.test.cjs
 ```
 
 The optional `tests/accessibility-browser.cjs` and `tests/query-limits-wasm.cjs`
@@ -42,6 +42,34 @@ The optional `tests/presets-live-browser.cjs` accepts a temporary prefix contain
 `playwright-core` and uses installed Chrome to check all eight one-click reports
 against the public CDN/catalog/data. It verifies complete pages and non-geometry
 columns, route values, and stop paging. Network access is required; no AI key is used.
+
+`tests/ai-times-browser.cjs` uses the same temporary browser prefix and the actual
+pinned DuckDB-Wasm engine with a synthetic in-memory trip-update fixture. It
+reproduces the timestamp errors, executes the SQL example supplied in the AI
+context, and checks known results for offsets, midnight, daylight-saving changes,
+invalid/missing values and service-day clocks beyond 24 hours. It also verifies
+the standard-report request without an API key. The repository/public catalogs
+are not modified. Network access is needed for the engine and initial catalog.
+
+Add `--live-ai` to that command to test actual generation with both approved
+models. This optional mode requires `GROQ_API_KEY` configured locally in the
+process environment; never commit or paste the key into chat. It sends synthetic
+fixture samples/questions to Groq, uses provider quota, and checks exact numeric
+results plus refusal to invent a missing service date. Model fallback does not
+count as verification of the requested model. Without this flag, provider calls
+are blocked and live generation is explicitly reported as not run.
+
+Exact, unqualified requests such as "Show CARTA Trip Updates & Delays (GTFS-RT)"
+use the tested standard report without an AI call or key. Requests with additional
+filters, calculations or sorting continue through AI generation. AI context now
+prioritizes time fields in bounded samples (up to three rows, 24 scalar columns,
+96 characters per value) and includes time semantics. Trip-update scheduled
+clocks have no confirmed service date, so they cannot independently establish a
+reliable delay against dated predictions. The assistant is instructed to explain
+that missing context rather than guess a date. The verified elapsed-time SQL
+example materializes parsed epochs before arithmetic to avoid a failure observed
+with the combined expression in the pinned Wasm engine. Prompt guidance reduces
+mistakes but does not guarantee every generated query or result is correct.
 
 Reports use the shared Rows per page control, defaulting to 100. Previous and Next
 load another page without accumulating all rows in the page's JavaScript state.
