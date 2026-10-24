@@ -21,6 +21,16 @@
     const REPORT_PAGE_SIZES = Object.freeze([50, 100, 250, 500, 1000]);
     const CSV_CHUNK_BYTES = 256 * 1024;
     const CSV_FALLBACK_MAX_BYTES = 20 * 1024 * 1024;
+    const REPORT_LABELS = Object.freeze({
+      "Latest Bus Vehicle Positions": "Bus positions",
+      "Clever Vehicle Locations": "Clever locations",
+      "Stop Predictions (Clever)": "Arrival predictions",
+      "Trip Updates & Delays (GTFS-RT)": "Trip updates",
+      "CARTA Bus Routes": "Bus routes",
+      "CARTA Bus Stops": "Bus stops",
+      "CARTA Monthly Ridership (NTD)": "Monthly ridership",
+      "Bike Chattanooga Stations": "Bike stations"
+    });
 
     // Friendly descriptions for CARTA datasets
     const DATASET_INFO = {
@@ -102,53 +112,53 @@
       {
         title: "Latest Bus Vehicle Positions",
         tag: "Customer Service",
-        desc: "Browse vehicle positions, newest observation first.",
+        desc: "Latest reported bus locations.",
         sql: 'SELECT "vehicle_id", "route_id", "trip_id", "trip_start_date", "trip_start_time", "direction_id", "direction", "headsign", "latitude", "longitude", "speed", "bearing", "timestamp", "schedule_relationship" FROM data.gtfsrt_vehicle_positions_v1 ORDER BY NULLIF("timestamp", 0) DESC NULLS LAST;',
         sourceTime: { column: "timestamp", format: "unix-seconds" }
       },
       {
         title: "Clever Vehicle Locations",
         tag: "Operations / Paratransit",
-        desc: "Browse Clever vehicle locations, newest timestamp first.",
+        desc: "Vehicle locations from Clever Devices.",
         sql: 'SELECT "vehicle_id", "route", "block_id", "destination", "heading", "latitude", "longitude", "pattern_id", "pattern_distance", "scheduled_start_date", "scheduled_start_time", "speed", "trip_id", "timestamp" FROM data.clever_vehicle_locations_v1 ORDER BY TRY_CAST("timestamp" AS TIMESTAMPTZ) DESC NULLS LAST;',
         sourceTime: { column: "timestamp", format: "iso" }
       },
       {
         title: "Stop Predictions (Clever)",
         tag: "Customer Service",
-        desc: "Show the newest prediction batches first, then the earliest predicted times.",
+        desc: "Predicted arrivals at bus stops.",
         sql: `SELECT "tmstmp", "typ", "stpnm", "stpid", "vid", "dstp", "rt", "rtdd", "rtdir", "des", "prdtm", "tablockid", "tatripid", "origtatripno", "dly", "dyn", "prdctdn", "zone", "nbus", "psgld", "stst", "stsd", "flagstop" FROM data.clever_predictions_v1 ORDER BY try_strptime("tmstmp", '%Y%m%d %H:%M') DESC NULLS LAST, try_strptime("prdtm", '%Y%m%d %H:%M') ASC NULLS LAST;`,
         sourceTime: { column: "tmstmp", format: "clever-local" }
       },
       {
         title: "Trip Updates & Delays (GTFS-RT)",
         tag: "Customer Service",
-        desc: "Inspect published trip updates. This dataset does not include an observation timestamp.",
+        desc: "Published trip and stop updates.",
         sql: 'SELECT "service_id", "route_id", "trip_id", "direction_id", "stop_headsign", "trip_start_time", "stop_id", "stop_code", "stop_name", "stop_sequence", "stop_sequence_actual", "schedule_relationship", "vehicle_id", "scheduled_arrival_time", "scheduled_departure_time", "predicted_arrival_time", "predicted_departure_time", "latitude", "longitude" FROM data.gtfsrt_trip_updates_v1;',
         sourceTime: { unavailable: "Source observation time unavailable: this dataset has no observation timestamp. Predicted arrival and departure times do not establish freshness." }
       },
       {
         title: "CARTA Bus Routes",
         tag: "Reference",
-        desc: "Browse CARTA bus routes and route names.",
+        desc: "",
         sql: 'SELECT "id", "name", "color" FROM data.simple_bus_routes ORDER BY "id";',
       },
       {
         title: "CARTA Bus Stops",
         tag: "Customer Service",
-        desc: "Browse bus stops to look up stop IDs and names for riders.",
+        desc: "",
         sql: 'SELECT "id", "name", "latitude", "longitude", "route_ids" FROM data.simple_bus_stops ORDER BY "id";',
       },
       {
         title: "CARTA Monthly Ridership (NTD)",
         tag: "Management",
-        desc: "View CARTA monthly ridership figures reported to the NTD.",
+        desc: "",
         sql: `SELECT "NTD ID", "Legacy NTD ID", "Agency", "Mode/Type of Service Status", "Reporter Type", "UACE CD", "UZA Name", "Mode", "TOS", "3 Mode", "Date", "UPT", "VOMS", "VRH", "VRM", "Agency Mode TOS Date", "State", "FTA Region" FROM data.ntd_monthly_ridership_v1 WHERE "NTD ID" = '${CARTA_NTD_ID}' ORDER BY "Date" DESC;`,
       },
       {
         title: "Bike Chattanooga Stations",
         tag: "Mobility",
-        desc: "Browse Bike Chattanooga stations and dock capacities.",
+        desc: "",
         sql: 'SELECT "station_id", "external_id", "name", "physical_configuration", "latitude", "longitude", "altitude", "address", "post_code", "capacity", "charging_station", "key", "transitcard", "creditcard", "phone", "virtual_station", "groups", "last_updated", "bikes_available", "bikes_disabled", "status", "docks_available", "docks_disabled", "last_reported", "installed", "renting", "returning", "FIT", "BOOST", "ICONIC", "EFIT", "CHLOE", "cross_street" FROM data.bike_chattanooga_stations_v1 ORDER BY "station_id";',
       }
     ];
@@ -182,6 +192,9 @@
     const sqlQueryBox = document.getElementById("sqlQueryBox");
     const runCustomSqlBtn = document.getElementById("runCustomSqlBtn");
     const resultsMeta = document.getElementById("resultsMeta");
+    const resultsTitle = document.getElementById("resultsTitle");
+    const resultsSummary = document.getElementById("resultsSummary");
+    const resultsFreshnessSummary = document.getElementById("resultsFreshnessSummary");
     const resultsFreshness = document.getElementById("resultsFreshness");
     const resultsScope = document.getElementById("resultsScope");
     const errorBanner = document.getElementById("errorBanner");
@@ -195,6 +208,7 @@
     const previousPageBtn = document.getElementById("previousPageBtn");
     const nextPageBtn = document.getElementById("nextPageBtn");
     const pageStatus = document.getElementById("pageStatus");
+    const reportPagination = document.getElementById("reportPagination");
 
     // Plain-English Search DOM elements
     const groqApiKeyInput = document.getElementById("groqApiKeyInput");
@@ -288,6 +302,7 @@
         if (activeAiRequestId === reportRequestId) {
           beginReportRequest("AI request canceled", "Key forgotten. Choose a public report or enter a new key.");
           resultsMeta.textContent = "AI request canceled after forgetting the key.";
+          resultsSummary.textContent = "AI request canceled.";
           resultsFreshness.textContent = "No report loaded.";
         }
         activeAiRequestId = null;
@@ -335,10 +350,9 @@
         btn.className = "preset-card";
         btn.innerHTML = `
           <div>
-            <div class="preset-card-title">${escapeHtml(report.title)}</div>
-            <div class="preset-card-desc">${escapeHtml(report.desc)}</div>
+            <div class="preset-card-title">${escapeHtml(reportDisplayTitle(report.title))}</div>
+            ${report.desc ? `<div class="preset-card-desc">${escapeHtml(report.desc)}</div>` : ""}
           </div>
-          <span class="preset-card-tag">${escapeHtml(report.tag)}</span>
         `;
         btn.addEventListener("click", () => {
           // executeQuery displays active-report errors; handle the event's rejected promise.
@@ -506,6 +520,15 @@
     });
 
     // Execute a SQL query and render table
+    function reportDisplayTitle(title) {
+      return title.startsWith('AI Search: "') ? "AI report" : REPORT_LABELS[title] || title;
+    }
+
+    function setReportHeading(title, summary) {
+      resultsTitle.textContent = reportDisplayTitle(title);
+      resultsSummary.textContent = summary;
+    }
+
     function reportLimitError(message) {
       const error = new Error(message);
       error.code = "REPORT_LIMIT";
@@ -637,6 +660,9 @@
       currentRows = [];
       currentColumns = [];
       currentReport = null;
+      setReportHeading("No report selected", "");
+      resultsFreshnessSummary.textContent = "";
+      reportPagination.hidden = true;
       quickSearchInput.disabled = true;
       exportCsvBtn.disabled = true;
       previousPageBtn.disabled = true;
@@ -656,6 +682,7 @@
       sqlQueryBox.value = "";
       aiStatusText.textContent = "";
       resultsMeta.textContent = `Running: ${title}...`;
+      setReportHeading(title, "Loading report...");
       resultsFreshness.textContent = "Waiting for query results...";
       resultsScope.textContent = "";
       tableContainer.innerHTML = `<div class="empty-state">${escapeHtml(message)}</div>`;
@@ -665,6 +692,7 @@
     function showReportError(title, err) {
       clearResults();
       resultsMeta.textContent = `${title}: Error`;
+      setReportHeading(title, "Report could not be completed.");
       resultsFreshness.textContent = "Source freshness unavailable because the report did not complete.";
       resultsScope.textContent = "No results available for this query.";
       tableContainer.innerHTML = `<div class="empty-state">Query could not be completed.</div>`;
@@ -694,7 +722,7 @@
       if (pageRequestId !== reportRequestId) return;
       if (restoreFocus && (document.activeElement === document.body || document.activeElement === control)) {
         const other = direction === "next" ? previousPageBtn : nextPageBtn;
-        const target = control.disabled ? (other.disabled ? rowsPerPage : other) : control;
+        const target = reportPagination.hidden ? exportCsvBtn : control.disabled ? (other.disabled ? rowsPerPage : other) : control;
         if (!target.disabled) target.focus();
         else if (!reconnectBtn.hidden) reconnectBtn.focus();
       }
@@ -708,7 +736,9 @@
       const restoreFocus = document.activeElement === rowsPerPage;
       const pageRequestId = reportRequestId + 1;
       try { await executePagedQuery(report.querySql, report.title, report.sourceTime); } catch { /* Shared report error handling. */ }
-      if (pageRequestId === reportRequestId && restoreFocus && !rowsPerPage.disabled && (document.activeElement === document.body || document.activeElement === rowsPerPage)) rowsPerPage.focus();
+      if (pageRequestId === reportRequestId && restoreFocus && !rowsPerPage.disabled && (document.activeElement === document.body || document.activeElement === rowsPerPage)) {
+        (reportPagination.hidden ? exportCsvBtn : rowsPerPage).focus();
+      }
     });
 
     async function executeQuery(sql, title = "Query Results", sourceTime = null, rowLimit = null, requestId = null, page = null) {
@@ -719,6 +749,7 @@
       hideError();
       sqlQueryBox.value = sql;
       resultsMeta.textContent = `Running: ${title}...`;
+      setReportHeading(title, "Loading report...");
       resultsFreshness.textContent = "Checking source timestamps...";
       resultsScope.textContent = "";
       tableContainer.innerHTML = `<div class="empty-state">Loading data from CARTA S3...</div>`;
@@ -738,9 +769,11 @@
           ? `${result.truncated ? `Partial page: loaded ${result.rows.length} rows (${result.reason}); use Next to continue. ` : ""}Download report (CSV) includes all rows matched by the report SQL, including any SQL limits. Search checks this page only and does not change the download. Source changes or tied sort values may shift rows between reads.`
           : describeResultScope(rowLimit, result);
         resultsFreshness.textContent = `${describeSourceFreshness(currentRows, sourceTime)} Report retrieved: ${reportTimeFormatter.format(new Date())} (${REPORT_TIME_ZONE}).`;
+        resultsFreshnessSummary.textContent = describeSourceFreshness(currentRows, sourceTime, true);
         exportCsvBtn.disabled = activeCsvExport !== null;
         quickSearchInput.disabled = currentRows.length === 0;
         if (page) {
+          reportPagination.hidden = !page.previous.length && !result.hasMore;
           const number = page.previous.length + 1;
           pageStatus.textContent = currentRows.length
             ? `Page ${number} · Rows ${(page.offset + 1).toLocaleString()}–${(page.offset + currentRows.length).toLocaleString()} · ${result.hasMore ? "more available" : "end of results"}`
@@ -795,10 +828,10 @@
       return { order: date.getTime(), label: `${reportTimeFormatter.format(date)} (${REPORT_TIME_ZONE})` };
     }
 
-    function describeSourceFreshness(rows, sourceTime) {
-      if (!rows.length) return "No records returned; source observation time unavailable.";
-      if (sourceTime?.unavailable) return sourceTime.unavailable;
-      if (!sourceTime) return "Source observation time not identified for this report.";
+    function describeSourceFreshness(rows, sourceTime, concise = false) {
+      if (!rows.length) return concise ? "No results returned." : "No records returned; source observation time unavailable.";
+      if (sourceTime?.unavailable) return concise ? "Source update time unavailable." : sourceTime.unavailable;
+      if (!sourceTime) return concise ? "Source update time unavailable." : "Source observation time not identified for this report.";
       let newest = null;
       let missing = 0;
       for (const row of rows) {
@@ -806,7 +839,8 @@
         if (!timestamp) missing++;
         else if (!newest || timestamp.order > newest.order) newest = timestamp;
       }
-      if (!newest) return "Source observation time unavailable: timestamps are missing or invalid.";
+      if (!newest) return concise ? "Source update time unavailable." : "Source observation time unavailable: timestamps are missing or invalid.";
+      if (concise) return `Newest source time shown: ${newest.label.replace(` (${REPORT_TIME_ZONE})`, "")}.`;
       const missingNote = missing ? ` ${missing} of ${rows.length} rows have missing or invalid source timestamps.` : "";
       return `Newest source timestamp in returned rows: ${newest.label}.${missingNote}`;
     }
@@ -857,6 +891,12 @@
         : currentRows;
       if (currentReport) {
         resultsMeta.textContent = `${currentReport.title}: ${filtered.length.toLocaleString()} displayed / ${currentRows.length.toLocaleString()} loaded rows${currentReport.page ? ` on page ${currentReport.page.previous.length + 1}` : ""} (${currentReport.elapsedMs} ms)${currentReport.truncated ? " [Partial result]" : ""}`;
+        const paged = currentReport.page && (currentReport.page.hasMore || currentReport.page.previous.length);
+        const count = term
+          ? `${filtered.length.toLocaleString()} of ${currentRows.length.toLocaleString()} rows shown${paged ? " on this page" : ""}`
+          : paged ? `${currentRows.length.toLocaleString()} rows on this page`
+          : `${currentRows.length.toLocaleString()} ${currentRows.length === 1 ? "result" : "results"}`;
+        setReportHeading(currentReport.title, `${count}${currentReport.truncated ? " · Partial result" : ""}`);
       }
       renderTable(filtered);
     }
@@ -902,7 +942,7 @@
       activeQueries.add(operation);
       exportCsvBtn.disabled = true;
       stopReportBtn.disabled = false;
-      setCsvExportStatus("Choose a CSV destination. The full report uses the loaded report SQL, without the page search.");
+      setCsvExportStatus("Choose where to save the CSV.");
       const checkActive = () => {
         if (operation.canceled || requestId !== reportRequestId || !conn) {
           const error = new Error("Export canceled.");
@@ -935,13 +975,13 @@
             bytes += chunk.byteLength;
             checkActive();
           };
-          setCsvExportStatus(`Exporting ${report.title}: 0 rows. Stop report cancels the export.${handle ? "" : " This browser buffers at most 20 MiB."}`);
-          const result = await runBoundedReport(report.querySql, requestId, null, reader => streamFullCsv(reader, write, checkActive, report.title));
+          setCsvExportStatus("Preparing CSV...");
+          const result = await runBoundedReport(report.querySql, requestId, null, reader => streamFullCsv(reader, write, checkActive));
           checkActive();
           if (!result) throw new Error("Export did not complete.");
           // Publish only after end-of-stream AND successful database cleanup.
           operation.committing = true;
-          setCsvExportStatus(`Finalizing complete CSV for ${report.title}...`);
+          setCsvExportStatus("Finishing CSV...");
           if (operation.writer) await operation.writer.close();
           else {
             const blob = new Blob(chunks, { type: "text/csv;charset=utf-8;" });
@@ -953,7 +993,7 @@
             setTimeout(() => URL.revokeObjectURL(url), 1000);
           }
           saved = true;
-          if (requestId === reportRequestId) setCsvExportStatus(`${handle ? "Saved" : "Download ready for"} ${report.title}: ${result.count.toLocaleString()} rows, ${bytes.toLocaleString()} bytes. Full SQL result from a fresh read; SQL limits apply. Page search was not applied.`);
+          if (requestId === reportRequestId) setCsvExportStatus(`${handle ? "CSV saved" : "CSV download ready"}: ${result.count.toLocaleString()} rows.`);
         } finally {
           // Never close a failed/aborted stream and publish a partial CSV.
           if (!saved) abortCsvWriter(operation);
@@ -978,7 +1018,7 @@
       }
     });
 
-    async function streamFullCsv(reader, write, checkActive, title) {
+    async function streamFullCsv(reader, write, checkActive) {
       await reader.open();
       checkActive();
       const columns = reader.schema.fields.map(field => field.name);
@@ -990,7 +1030,7 @@
         await write(encoder.encode(parts.join("")));
         parts = [];
         chunkBytes = 0;
-        setCsvExportStatus(`Exporting ${title}: ${count.toLocaleString()} rows written. Stop report cancels the export.`);
+        setCsvExportStatus(`Preparing CSV: ${count.toLocaleString()} rows.`);
         await new Promise(resolve => setTimeout(resolve, 0));
         checkActive();
       };

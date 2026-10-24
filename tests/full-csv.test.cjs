@@ -75,7 +75,7 @@ test("full CSV exports every matching row beyond page, row and cell caps, withou
   assert.deepEqual(h.state().rows, before.rows);
   assert.deepEqual(h.state().report, before.report);
   assert.match(link.download, /_full\.csv$/);
-  assert.match(h.ui.csvExportStatus.textContent, /6,505 rows.*Page search was not applied/);
+  assert.equal(h.ui.csvExportStatus.textContent, "CSV download ready: 6,505 rows.");
   assert.equal(h.ui.exportCsvBtn.disabled, false);
   assert.equal(h.state().pendingQueries, 0);
 });
@@ -111,7 +111,7 @@ test("direct file writes apply backpressure and stream over 20 MiB without retai
   assert.equal(writer.closed, 1); assert.equal(writer.aborted, 0);
   assert.equal(h.downloads.length, 0);
   assert.deepEqual(h.state().rows, [{ id: "100" }]);
-  assert.match(h.ui.csvExportStatus.textContent, /^Saved.*300 rows/);
+  assert.match(h.ui.csvExportStatus.textContent, /^CSV saved: 300 rows/);
 });
 
 test("fallback downloads fail completely above the byte budget, retaining the current page", async () => {
@@ -174,7 +174,7 @@ test("Stop aborts a stalled file write, publishes no CSV, and offers recovery", 
   assert.equal(h.ui.exportCsvBtn.disabled, true);
   blocked.resolve(); await tick(); await tick();
   assert.equal(writer.closed, 0); assert.equal(writes, 1);
-  assert.doesNotMatch(h.ui.csvExportStatus.textContent, /^Saved/);
+  assert.doesNotMatch(h.ui.csvExportStatus.textContent, /^CSV saved/);
 });
 
 test("a new report cancels an export without letting late progress or completion overwrite the new state", async () => {
@@ -213,7 +213,7 @@ test("filesystem write, close, and database cleanup failures never claim a succe
     await pending; await tick();
     assert.equal(writer.closed, 0); assert.equal(writer.aborted, 1);
     assert.match(h.ui.csvExportStatus.textContent, new RegExp(`${stage} failed`));
-    assert.doesNotMatch(h.ui.csvExportStatus.textContent, /^Saved/);
+    assert.doesNotMatch(h.ui.csvExportStatus.textContent, /^CSV saved/);
   }
 });
 
@@ -241,14 +241,14 @@ test("a stalled final commit is aborted by the watchdog and never reported as a 
   assert.equal(writer.aborted, 1);
   assert.match(h.ui.csvExportStatus.textContent, /saving could not be confirmed/);
   blocked.resolve(); await tick();
-  assert.doesNotMatch(h.ui.csvExportStatus.textContent, /^Saved/);
+  assert.doesNotMatch(h.ui.csvExportStatus.textContent, /^CSV saved/);
   assert.equal(h.ui.exportCsvBtn.disabled, true);
 });
 
 test("starting a new report clears a completed export's old status", async () => {
   const h = harness(); await open(h);
   const pending = h.export(); await respond(h, stream(1)); await pending;
-  assert.match(h.ui.csvExportStatus.textContent, /^Download ready for/);
+  assert.match(h.ui.csvExportStatus.textContent, /^CSV download ready/);
   await open(h, "SELECT id FROM data.simple_bus_routes WHERE id=2", [{ id: 2 }]);
   assert.equal(h.ui.csvExportStatus.textContent, "");
 });

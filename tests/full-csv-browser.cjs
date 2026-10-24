@@ -72,7 +72,7 @@ async function main() {
     const finish = async () => {
       await page.waitForFunction(() => !document.querySelector("#exportCsvBtn").disabled);
       const status = await page.locator("#csvExportStatus").textContent();
-      assert.match(status, /^(Saved|Download ready for)/);
+      assert.match(status, /^CSV (saved|download ready):/);
       return status;
     };
     const exportDisk = async () => { await page.locator("#exportCsvBtn").click(); return finish(); };

@@ -177,6 +177,7 @@
       flex-direction: column;
       justify-content: space-between;
       gap: 0.4rem;
+      min-height: 76px;
     }
 
     .preset-card:hover {
@@ -195,19 +196,6 @@
     .preset-card-desc {
       font-size: 0.82rem;
       color: var(--muted);
-    }
-
-    .preset-card-tag {
-      display: inline-block;
-      align-self: flex-start;
-      font-size: 0.72rem;
-      font-weight: 600;
-      text-transform: uppercase;
-      background: #e0f2fe;
-      color: var(--text);
-      padding: 0.15rem 0.5rem;
-      border-radius: 4px;
-      margin-top: 0.25rem;
     }
 
     /* Form Controls */
@@ -440,8 +428,20 @@
 
     .results-meta {
       font-size: 0.9rem;
-      font-weight: 600;
     }
+
+    .results-heading h2 { margin: 0; font-size: 1.1rem; }
+    .results-summary { margin: 0.25rem 0 0; font-size: 0.9rem; }
+    .results-freshness { margin: 0 0 0.85rem; font-size: 0.85rem; }
+    .results-summary:empty,
+    .results-freshness:empty,
+    #csvExportStatus:empty,
+    #stopReportBtn:disabled { display: none; }
+
+    .report-details { padding: 0.7rem 0; border-bottom: 1px solid var(--border); font-size: 0.85rem; }
+    .report-details summary { cursor: pointer; font-weight: 600; }
+    .report-details .panel-subtitle { margin: 0.65rem 0 0; font-size: 0.85rem; }
+    .table-container + .report-pagination[hidden] + .report-details { margin-top: 0.5rem; }
 
     .results-actions {
       display: flex;
@@ -456,7 +456,7 @@
       flex-wrap: wrap;
       align-items: flex-end;
       gap: 0.75rem;
-      margin-bottom: 1rem;
+      margin: 0.85rem 0 0.25rem;
     }
 
     .report-pagination .form-group { max-width: 100%; }
@@ -485,6 +485,7 @@
     }
 
     .sql-details {
+      margin-top: 0.7rem;
       margin-bottom: 0.85rem;
       background: var(--code-bg);
       color: var(--code-text);

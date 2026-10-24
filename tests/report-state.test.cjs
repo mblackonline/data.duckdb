@@ -31,6 +31,10 @@ function harness({ actualGenerator = false, storage = { getItem() { return null;
   }
   const connections = [];
   context.csvExportStatus = { textContent: "" };
+  context.resultsTitle = { textContent: "" };
+  context.resultsSummary = { textContent: "" };
+  context.resultsFreshnessSummary = { textContent: "" };
+  context.reportPagination = { hidden: true };
   context.exportCsvBtn.textContent = "Download report (CSV)";
   let terminated = 0, reloaded = 0;
   Object.assign(context, {

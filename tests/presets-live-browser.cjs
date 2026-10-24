@@ -41,7 +41,11 @@ async function main() {
     await page.route("https://api.groq.com/**", route => route.abort());
     await page.goto(`http://127.0.0.1:${server.address().port}`);
     await page.waitForFunction(() => globalThis.presetCheck?.conn && document.querySelector("#dbStatusText").textContent.includes("Connected"), null, { timeout: 60000 });
+    // Page-size controls appear only after a report needs multiple pages.
+    await page.getByRole("button", { name: "Bus stops", exact: true }).click();
+    await page.waitForFunction(() => presetCheck.snapshot.report?.title === "CARTA Bus Stops");
     await page.locator("#rowsPerPage").selectOption("1000");
+    await page.waitForFunction(() => presetCheck.snapshot.report?.page.size === 1000);
     const presets = await page.evaluate(() => presetCheck.presets);
     assert.equal(presets.length, 8);
     let tripUpdateCount = 0;

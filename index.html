@@ -27,8 +27,8 @@
 
     <!-- TAB 1: ONE-CLICK PRESETS -->
     <section id="panel-presets" class="panel active" role="tabpanel" aria-labelledby="tab-presets" tabindex="0">
-      <h2>One-Click Reports for Customer Service &amp; Operations</h2>
-      <p class="panel-subtitle">Click a report to query the published data. Check its source timestamp before treating it as current.</p>
+      <h2>One-click reports</h2>
+      <p class="panel-subtitle">Choose a report to view its results.</p>
       <div id="presetGrid" class="preset-grid"></div>
     </section>
 
@@ -159,7 +159,10 @@
     <!-- RESULTS TABLE -->
     <section class="results-card">
       <div class="results-toolbar">
-        <div id="resultsMeta" class="results-meta" role="status" aria-live="polite" aria-atomic="true">No report loaded yet</div>
+        <div class="results-heading">
+          <h2 id="resultsTitle">No report selected</h2>
+          <p id="resultsSummary" class="results-summary" role="status" aria-live="polite" aria-atomic="true"></p>
+        </div>
         <div class="results-actions">
           <div class="form-group" style="max-width: 100%;">
             <label for="quickSearchInput">Search this page</label>
@@ -177,7 +180,15 @@
         </div>
       </div>
 
-      <div class="report-pagination" role="group" aria-label="Report page navigation">
+      <p id="resultsFreshnessSummary" class="results-freshness" role="status" aria-live="polite"></p>
+      <p id="csvExportStatus" class="panel-subtitle" role="status" aria-live="polite" aria-atomic="true"></p>
+      <div id="errorBanner" class="error-banner" role="alert" aria-atomic="true"></div>
+
+      <div id="tableContainer" class="table-container" role="region" aria-label="Report results" aria-describedby="resultsSummary" tabindex="0">
+        <div class="empty-state">Choose a report above to get started.</div>
+      </div>
+
+      <div id="reportPagination" class="report-pagination" role="group" aria-label="Report page navigation" hidden>
         <div class="form-group">
           <label for="rowsPerPage">Rows per page</label>
           <select id="rowsPerPage" disabled>
@@ -195,15 +206,22 @@
         </div>
       </div>
 
-      <div id="resultsFreshness" class="panel-subtitle" role="status" aria-live="polite"></div>
-      <div id="resultsScope" class="panel-subtitle" role="status" aria-live="polite"></div>
-      <p id="csvExportHelp" class="panel-subtitle">
-        CSV exports add a protective tab before formula-like text for Excel. Plain numbers are unchanged.
-        Import identifier columns as Text in Excel to preserve leading zeros and long IDs.
-      </p>
+      <details class="report-details" id="reportDetails">
+        <summary>Report details</summary>
+        <p id="resultsMeta" class="panel-subtitle">No report loaded yet</p>
+        <p id="resultsFreshness" class="panel-subtitle"></p>
+        <p id="resultsScope" class="panel-subtitle"></p>
+      </details>
 
-      <p id="fullCsvHelp" class="panel-subtitle">Downloads read source data again. Choose a CSV destination when prompted. Stop report cancels the download and requires Reconnect. Exports must finish within 30 seconds; browsers without direct file saving allow up to 20 MiB.</p>
-      <p id="csvExportStatus" class="panel-subtitle" role="status" aria-live="polite" aria-atomic="true"></p>
+      <details class="report-details" id="downloadHelp">
+        <summary>Download help</summary>
+        <p class="panel-subtitle">Download report (CSV) includes all matching report rows, including any limits in the report SQL. Search this page only changes the display.</p>
+        <p id="csvExportHelp" class="panel-subtitle">
+          CSV exports add a protective tab before formula-like text for Excel. Plain numbers are unchanged.
+          Import identifier columns as Text in Excel to preserve leading zeros and long IDs.
+        </p>
+        <p id="fullCsvHelp" class="panel-subtitle">Downloads read source data again. Choose a CSV destination when prompted. Stop report cancels the download and requires Reconnect. Exports must finish within 30 seconds; browsers without direct file saving allow up to 20 MiB.</p>
+      </details>
 
       <details class="sql-details">
         <summary>View or Edit SQL Query</summary>
@@ -215,13 +233,6 @@
         </div>
       </details>
 
-      <div id="errorBanner" class="error-banner" role="alert" aria-atomic="true"></div>
-
-      <div id="tableContainer" class="table-container" role="region" aria-label="Report results" aria-describedby="resultsMeta" tabindex="0">
-        <div class="empty-state">
-          Select one of the <strong>One-Click Reports</strong> above to view CARTA data.
-        </div>
-      </div>
     </section>
   </main>
 

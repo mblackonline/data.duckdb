@@ -73,6 +73,10 @@ mistakes but does not guarantee every generated query or result is correct.
 
 Reports use the shared Rows per page control, defaulting to 100. Previous and Next
 load another page without accumulating all rows in the page's JavaScript state.
+Page controls appear below the table only when multiple pages are available.
+The main results heading shows a short report name and count; Report details
+contains the original AI question, execution information and source-time details.
+Download help contains CSV guidance and limits. Stop report appears during work.
 Preset and builder queries have no automatic total-row limit; AI instructions
 request a LIMIT only when the question explicitly asks for one. Limits written in
 report SQL are preserved. SQL is validated and reconstructed by DuckDB before an
