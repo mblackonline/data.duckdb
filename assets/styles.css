@@ -510,6 +510,7 @@
     .sql-editor-row textarea {
       flex: 1 1 24rem;
       min-width: 0;
+      field-sizing: content;
       background: #0f172a;
       color: #f8fafc;
       border: 1px solid #334155;
