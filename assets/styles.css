@@ -455,7 +455,15 @@
     }
 
     .report-pagination .form-group { max-width: 100%; }
-    #pageStatus { align-self: center; font-size: 0.9rem; }
+    .page-navigation-controls {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.75rem;
+      max-width: 100%;
+      min-width: 0;
+    }
+    #pageStatus { font-size: 0.9rem; overflow-wrap: anywhere; }
 
     .panel,
     .results-card,
