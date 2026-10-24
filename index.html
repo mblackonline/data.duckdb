@@ -11,14 +11,14 @@
       --primary: #0056b3;
       --primary-hover: #004085;
       --accent: #0ea5e9;
-      --text: #1e293b;
-      --muted: #64748b;
+      --text: #000000;
+      --muted: #000000;
       --border: #e2e8f0;
       --success: #15803d;
       --warning: #d97706;
       --danger: #b91c1c;
-      --code-bg: #0f172a;
-      --code-text: #e2e8f0;
+      --code-bg: #f8fafc;
+      --code-text: #000000;
     }
 
     * {
@@ -35,6 +35,14 @@
       background-color: var(--bg);
       color: var(--text);
       line-height: 1.5;
+    }
+
+    a { color: var(--text); }
+
+    input::placeholder,
+    textarea::placeholder {
+      color: var(--text);
+      opacity: 1;
     }
 
     header {
@@ -58,7 +66,7 @@
     header p {
       margin: 0.2rem 0 0;
       font-size: 0.9rem;
-      opacity: 0.9;
+      opacity: 1;
     }
 
     .status-badge {
@@ -117,7 +125,7 @@
 
     .tab-btn:hover {
       border-color: var(--primary);
-      color: var(--primary);
+      color: var(--text);
     }
 
     .tab-btn.active {
@@ -182,7 +190,7 @@
     .preset-card-title {
       font-weight: 600;
       font-size: 0.95rem;
-      color: var(--primary);
+      color: var(--text);
     }
 
     .preset-card-desc {
@@ -197,7 +205,7 @@
       font-weight: 600;
       text-transform: uppercase;
       background: #e0f2fe;
-      color: #0369a1;
+      color: var(--text);
       padding: 0.15rem 0.5rem;
       border-radius: 4px;
       margin-top: 0.25rem;
@@ -251,7 +259,7 @@
     }
 
     .sql-details :focus-visible {
-      outline-color: #93c5fd;
+      outline-color: var(--primary);
     }
 
     .btn {
@@ -332,6 +340,7 @@
     }
 
     .ai-warning { flex: 1 1 30rem; margin: 0; }
+    .ai-warning strong { display: block; color: var(--danger); font-weight: 700; }
     .ai-actions .btn { padding: 0.75rem 1.25rem; }
 
     .ai-details {
@@ -365,9 +374,9 @@
 
     .ai-key-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.65rem; }
     .ai-detail-copy p { margin: 0.65rem 0 0; }
-    .ai-detail-copy a { color: var(--primary); }
+    .ai-detail-copy a { color: var(--text); }
     #groqKeyStatus { margin: 0.65rem 0 0; }
-    #aiStatusText { color: var(--primary); font-weight: 600; }
+    #aiStatusText { color: var(--text); font-weight: 600; }
     #aiStatusText:not(:empty) { margin-top: 1rem; }
 
     @media (max-width: 700px) {
@@ -469,7 +478,7 @@
     .sql-details summary {
       cursor: pointer;
       font-weight: 600;
-      color: #93c5fd;
+      color: var(--text);
     }
 
     .sql-editor-row {
@@ -483,9 +492,9 @@
     .sql-editor-row textarea {
       flex: 1 1 24rem;
       min-width: 0;
-      background: #1e293b;
-      color: #f8fafc;
-      border: 1px solid #334155;
+      background: #ffffff;
+      color: var(--text);
+      border: 1px solid var(--border);
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
       font-size: 0.83rem;
       min-height: 60px;
@@ -668,8 +677,8 @@
         <p id="aiQuestionHelp" class="ai-input-hint">Enter to create a report. Shift+Enter adds a new line.</p>
         <div class="ai-actions">
           <p id="aiPrivacyWarning" class="ai-warning">
-            Questions and public dataset samples are sent to Groq. Do not enter confidential information,
-            personal information, passwords, or API keys.
+            Questions and public dataset samples are sent to Groq.
+            <strong>Do not enter confidential information, personal information, passwords, or API keys.</strong>
           </p>
           <button id="askAiBtn" class="btn" disabled>Create report</button>
         </div>
