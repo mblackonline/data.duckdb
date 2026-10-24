@@ -115,6 +115,34 @@ async function main() {
     await current.h.run("SELECT COUNT(*) AS records FROM data.simple_bus_routes", "Recovered");
     assert.deepEqual(current.h.state().rows, [{ records: "10000" }]);
     console.log("PASS: A fresh worker runs reports after forced-stop recovery");
+
+    // Reproduce the oversized route geometry from the public directory without
+    // requiring remote data. Future extra payload columns must not leak into presets.
+    const fixtureConn = await current.db.connect();
+    try {
+      await fixtureConn.query(`CREATE OR REPLACE TABLE data.simple_bus_routes AS
+        SELECT id, name, color, repeat('g', 400001) AS geometry, repeat('x', 400001) AS extra_payload
+        FROM (VALUES ('04', 'Market Street', '#123456'), ('001', 'North Shore', '#abcdef')) t(id, name, color)`);
+    } finally { await fixtureConn.close(); }
+    await assert.rejects(current.h.runPage("SELECT * FROM data.simple_bus_routes"), /row is too large/);
+    assert.equal(current.h.ui.exportCsvBtn.disabled, true);
+    const presetsSource = source.slice(source.indexOf("    const PRESET_REPORTS"), source.indexOf("    // State"));
+    const presets = new Function("CARTA_NTD_ID", presetsSource + "\nreturn PRESET_REPORTS;")("40001");
+    const routes = presets.find(report => report.title === "CARTA Bus Routes");
+    await current.h.runPage(routes.sql, routes.title);
+    assert.deepEqual(current.h.state().columns, ["id", "name", "color"]);
+    assert.deepEqual(current.h.state().rows, [
+      { id: "001", name: "North Shore", color: "#abcdef" },
+      { id: "04", name: "Market Street", color: "#123456" }
+    ]);
+    assert.equal(current.h.state().report.truncated, false);
+    assert.equal(current.h.state().report.page.hasMore, false);
+    current.h.export();
+    const csv = await current.h.downloads.at(-1).text();
+    assert.match(csv, /^id,name,color\r\n/);
+    assert(csv.includes("Market Street"));
+    assert(!csv.includes("geometry") && !csv.includes("extra_payload"));
+    console.log("PASS: Route preset and CSV retain complete IDs/names/colors despite oversized geometry and extra source fields; raw SQL safeguard remains active");
   } finally {
     clearTimeout(deadline);
     for (const { worker, db } of engines) {

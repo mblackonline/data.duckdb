@@ -94,59 +94,60 @@
       }
     };
 
-    // Preset one-click reports
+    // Preset table reports select reporting fields explicitly. Geometry payloads
+    // belong in mapping tools and can exceed the browser's per-cell safeguard.
     const PRESET_REPORTS = [
       {
         title: "Latest Bus Vehicle Positions",
         tag: "Customer Service",
         desc: "Browse vehicle positions, newest observation first.",
-        sql: 'SELECT * FROM data.gtfsrt_vehicle_positions_v1 ORDER BY NULLIF("timestamp", 0) DESC NULLS LAST;',
+        sql: 'SELECT "vehicle_id", "route_id", "trip_id", "trip_start_date", "trip_start_time", "direction_id", "direction", "headsign", "latitude", "longitude", "speed", "bearing", "timestamp", "schedule_relationship" FROM data.gtfsrt_vehicle_positions_v1 ORDER BY NULLIF("timestamp", 0) DESC NULLS LAST;',
         sourceTime: { column: "timestamp", format: "unix-seconds" }
       },
       {
         title: "Clever Vehicle Locations",
         tag: "Operations / Paratransit",
         desc: "Browse Clever vehicle locations, newest timestamp first.",
-        sql: 'SELECT * FROM data.clever_vehicle_locations_v1 ORDER BY TRY_CAST("timestamp" AS TIMESTAMPTZ) DESC NULLS LAST;',
+        sql: 'SELECT "vehicle_id", "route", "block_id", "destination", "heading", "latitude", "longitude", "pattern_id", "pattern_distance", "scheduled_start_date", "scheduled_start_time", "speed", "trip_id", "timestamp" FROM data.clever_vehicle_locations_v1 ORDER BY TRY_CAST("timestamp" AS TIMESTAMPTZ) DESC NULLS LAST;',
         sourceTime: { column: "timestamp", format: "iso" }
       },
       {
         title: "Stop Predictions (Clever)",
         tag: "Customer Service",
         desc: "Show the newest prediction batches first, then the earliest predicted times.",
-        sql: `SELECT * FROM data.clever_predictions_v1 ORDER BY try_strptime("tmstmp", '%Y%m%d %H:%M') DESC NULLS LAST, try_strptime("prdtm", '%Y%m%d %H:%M') ASC NULLS LAST;`,
+        sql: `SELECT "tmstmp", "typ", "stpnm", "stpid", "vid", "dstp", "rt", "rtdd", "rtdir", "des", "prdtm", "tablockid", "tatripid", "origtatripno", "dly", "dyn", "prdctdn", "zone", "nbus", "psgld", "stst", "stsd", "flagstop" FROM data.clever_predictions_v1 ORDER BY try_strptime("tmstmp", '%Y%m%d %H:%M') DESC NULLS LAST, try_strptime("prdtm", '%Y%m%d %H:%M') ASC NULLS LAST;`,
         sourceTime: { column: "tmstmp", format: "clever-local" }
       },
       {
         title: "Trip Updates & Delays (GTFS-RT)",
         tag: "Customer Service",
         desc: "Inspect published trip updates. This dataset does not include an observation timestamp.",
-        sql: "SELECT * FROM data.gtfsrt_trip_updates_v1;",
+        sql: 'SELECT "service_id", "route_id", "trip_id", "direction_id", "stop_headsign", "trip_start_time", "stop_id", "stop_code", "stop_name", "stop_sequence", "stop_sequence_actual", "schedule_relationship", "vehicle_id", "scheduled_arrival_time", "scheduled_departure_time", "predicted_arrival_time", "predicted_departure_time", "latitude", "longitude" FROM data.gtfsrt_trip_updates_v1;',
         sourceTime: { unavailable: "Source observation time unavailable: this dataset has no observation timestamp. Predicted arrival and departure times do not establish freshness." }
       },
       {
         title: "CARTA Bus Routes",
         tag: "Reference",
         desc: "Browse CARTA bus routes and route names.",
-        sql: "SELECT * FROM data.simple_bus_routes;",
+        sql: 'SELECT "id", "name", "color" FROM data.simple_bus_routes ORDER BY "id";',
       },
       {
         title: "CARTA Bus Stops",
         tag: "Customer Service",
         desc: "Browse bus stops to look up stop IDs and names for riders.",
-        sql: "SELECT * FROM data.simple_bus_stops;",
+        sql: 'SELECT "id", "name", "latitude", "longitude", "route_ids" FROM data.simple_bus_stops ORDER BY "id";',
       },
       {
         title: "CARTA Monthly Ridership (NTD)",
         tag: "Management",
         desc: "View CARTA monthly ridership figures reported to the NTD.",
-        sql: `SELECT * FROM data.ntd_monthly_ridership_v1 WHERE "NTD ID" = '${CARTA_NTD_ID}' ORDER BY "Date" DESC;`,
+        sql: `SELECT "NTD ID", "Legacy NTD ID", "Agency", "Mode/Type of Service Status", "Reporter Type", "UACE CD", "UZA Name", "Mode", "TOS", "3 Mode", "Date", "UPT", "VOMS", "VRH", "VRM", "Agency Mode TOS Date", "State", "FTA Region" FROM data.ntd_monthly_ridership_v1 WHERE "NTD ID" = '${CARTA_NTD_ID}' ORDER BY "Date" DESC;`,
       },
       {
         title: "Bike Chattanooga Stations",
         tag: "Mobility",
         desc: "Browse Bike Chattanooga stations and dock capacities.",
-        sql: "SELECT * FROM data.bike_chattanooga_stations_v1;",
+        sql: 'SELECT "station_id", "external_id", "name", "physical_configuration", "latitude", "longitude", "altitude", "address", "post_code", "capacity", "charging_station", "key", "transitcard", "creditcard", "phone", "virtual_station", "groups", "last_updated", "bikes_available", "bikes_disabled", "status", "docks_available", "docks_disabled", "last_reported", "installed", "renting", "returning", "FIT", "BOOST", "ICONIC", "EFIT", "CHLOE", "cross_street" FROM data.bike_chattanooga_stations_v1 ORDER BY "station_id";',
       }
     ];
 

@@ -38,6 +38,11 @@ checks accept temporary dependency prefixes as documented at the top of each
 script. The browser check serves the real HTML, CSS, and JavaScript files while
 mocking external data and AI requests.
 
+The optional `tests/presets-live-browser.cjs` accepts a temporary prefix containing
+`playwright-core` and uses installed Chrome to check all eight one-click reports
+against the public CDN/catalog/data. It verifies complete pages and non-geometry
+columns, route values, and stop paging. Network access is required; no AI key is used.
+
 Reports use the shared Rows per page control, defaulting to 100. Previous and Next
 load another page without accumulating all rows in the page's JavaScript state.
 Preset and builder queries have no automatic total-row limit; AI instructions
@@ -52,6 +57,12 @@ queries and oversized cells/pages still have resource safeguards and cancellatio
 Search applies to the current page, and CSV downloads currently contain only that
 page's loaded rows, including rows hidden by search. Full-report CSV export is a
 separate follow-up.
+
+One-click table reports select explicit reporting columns. Geometry payloads are
+excluded from these presets because they are intended for maps and can exceed
+the per-cell display limit. IDs, names, coordinates and other non-geometry fields
+are preserved. Geometry remains available in the underlying datasets for custom
+queries, subject to the existing output safeguards.
 
 ## Background
 Both data availability and access are important.  CARTA publishes all its open datasets using [datablob](https://pypi.org/project/datablob) in numerous file formats, including parquet.  After making data available, we wanted to drive down the friction in accessing and analyzing the data, so we created data.duckdb.  A single DuckDB database that points to all our open datasets.  It enables people to easily query, filter, and join all our open datasets.
