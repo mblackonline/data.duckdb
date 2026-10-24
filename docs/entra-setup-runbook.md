@@ -6,12 +6,21 @@ Use an Application Administrator or Cloud Application Administrator account auth
 
 ## 1. Sign in
 
-Enter the tenant ID and administrator's sign-in name. Select that account in Microsoft's sign-in window.
+Enter these values when prompted:
+
+| Prompt | What to enter |
+| --- | --- |
+| Target tenant ID | The tenant's GUID, a 36-character ID containing hyphens. Do not enter its display name. |
+| Administrator sign-in email | Email used on Microsoft's sign-in screen. |
+
+If Azure CLI is already signed into the intended tenant, read its ID with `az account show --query tenantId --output tsv`. This shows the currently selected tenant only.
+
+Select the same administrator account in Microsoft's sign-in window. If a command fails, correct the input and restart this step before continuing.
 
 ~~~powershell
 $ErrorActionPreference = 'Stop'
-$TenantId = ([guid](Read-Host 'Target tenant ID')).ToString()
-$AdminUpn = (Read-Host 'Administrator sign-in name').Trim()
+$TenantId = ([guid](Read-Host 'Target tenant ID (GUID, not display name)')).ToString()
+$AdminUpn = (Read-Host 'Administrator Microsoft sign-in email').Trim()
 az login --tenant $TenantId --allow-no-subscriptions --output none
 if ($LASTEXITCODE -ne 0) { throw 'Sign-in failed.' }
 $Context = az account show --output json | ConvertFrom-Json
