@@ -11,7 +11,13 @@ const prefix = path.resolve(process.argv[2]);
 const requireTemp = createRequire(path.join(prefix, "verify.cjs"));
 const { chromium } = requireTemp("playwright-core");
 const AxeBuilder = requireTemp("@axe-core/playwright").default;
-const html = fs.readFileSync(path.join(__dirname, "..", "index.html"), "utf8");
+const root = path.join(__dirname, "..");
+const staticFiles = new Map([
+  ["/", { type: "text/html; charset=utf-8", body: fs.readFileSync(path.join(root, "index.html")) }],
+  ["/assets/styles.css", { type: "text/css; charset=utf-8", body: fs.readFileSync(path.join(root, "assets", "styles.css")) }],
+  ["/assets/app.js", { type: "text/javascript; charset=utf-8", body: fs.readFileSync(path.join(root, "assets", "app.js")) }],
+  ["/mock-worker.js", { type: "text/javascript; charset=utf-8", body: "" }]
+]);
 const baseline = process.argv.includes("--baseline");
 const executablePath = process.argv.slice(3).find(value => /\.exe$/i.test(value)) || [
   "C:/Program Files/Google/Chrome/Application/chrome.exe",
@@ -57,8 +63,11 @@ const fixtureModule = `
 
 async function main() {
   const server = http.createServer((request, response) => {
-    response.setHeader("Content-Type", request.url === "/mock-worker.js" ? "text/javascript" : "text/html; charset=utf-8");
-    response.end(request.url === "/mock-worker.js" ? "" : html);
+    const file = staticFiles.get(new URL(request.url, "http://localhost").pathname);
+    response.setHeader("X-Content-Type-Options", "nosniff");
+    response.setHeader("Cache-Control", "no-store");
+    response.writeHead(file ? 200 : 404, { "Content-Type": file?.type || "text/plain; charset=utf-8" });
+    response.end(file ? file.body : "Not found");
   });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
@@ -85,7 +94,15 @@ async function main() {
       }
       return route.abort();
     });
+    const cssLoaded = page.waitForResponse(`${origin}/assets/styles.css`);
+    const jsLoaded = page.waitForResponse(`${origin}/assets/app.js`);
     await page.goto(origin);
+    const [cssResponse, jsResponse] = await Promise.all([cssLoaded, jsLoaded]);
+    assert.equal(cssResponse.status(), 200);
+    assert.match(cssResponse.headers()["content-type"], /^text\/css/);
+    assert.equal(jsResponse.status(), 200);
+    assert.match(jsResponse.headers()["content-type"], /^text\/javascript/);
+    console.log("PASS: external stylesheet and JavaScript module load with correct content types");
     await page.getByText("Connected (1 CARTA datasets ready)", { exact: true }).waitFor();
     const audit = async label => {
       await page.evaluate(async () => {

@@ -4,8 +4,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
 
-const html = fs.readFileSync(path.join(__dirname, "..", "index.html"), "utf8");
-const source = html.match(/<script type="module">([\s\S]*?)<\/script>/)[1];
+const source = fs.readFileSync(path.join(__dirname, "..", "assets", "app.js"), "utf8");
 
 function section(start, end) {
   const first = source.indexOf(start);

@@ -14,7 +14,7 @@ const requireTemp = createRequire(path.join(prefix, "verify.cjs"));
 const WebWorkerClass = requireTemp("web-worker");
 const pkg = path.join(prefix, "node_modules", "@duckdb", "duckdb-wasm");
 const duckdb = require(path.join(pkg, "dist", "duckdb-node.cjs"));
-const source = fs.readFileSync(path.join(__dirname, "..", "index.html"), "utf8").match(/<script type="module">([\s\S]*?)<\/script>/)[1];
+const source = fs.readFileSync(path.join(__dirname, "..", "assets", "app.js"), "utf8");
 const engines = [];
 
 async function engine() {

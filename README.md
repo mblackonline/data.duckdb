@@ -11,6 +11,33 @@ You can add this database into your own DuckDB instance with one line by using D
 ATTACH 'https://gocarta.s3.us-east-2.amazonaws.com/public/duckdb/data.duckdb' as data;
 ```
 
+## Web explorer development
+
+The browser application uses `index.html` for page structure,
+`assets/styles.css` for the stylesheet, and `assets/app.js` for its JavaScript
+module. The DuckDB-Wasm dependency is pinned in `assets/app.js`.
+
+From the repository root on your development computer, start a local preview:
+
+```powershell
+python -m http.server 8000 --bind 127.0.0.1
+```
+
+Open http://127.0.0.1:8000 in your browser. Press Ctrl+C in the terminal to stop
+the preview. JavaScript modules should be tested through this HTTP server rather
+than opening `index.html` directly as a local file.
+
+Run the report, key-handling, CSV, and SQL-policy regression checks with:
+
+```powershell
+node --test --test-reporter=dot tests/report-state.test.cjs tests/api-key.test.cjs tests/csv-export.test.cjs tests/sql-policy.test.cjs
+```
+
+The optional `tests/accessibility-browser.cjs` and `tests/query-limits-wasm.cjs`
+checks accept temporary dependency prefixes as documented at the top of each
+script. The browser check serves the real HTML, CSS, and JavaScript files while
+mocking external data and AI requests.
+
 ## Background
 Both data availability and access are important.  CARTA publishes all its open datasets using [datablob](https://pypi.org/project/datablob) in numerous file formats, including parquet.  After making data available, we wanted to drive down the friction in accessing and analyzing the data, so we created data.duckdb.  A single DuckDB database that points to all our open datasets.  It enables people to easily query, filter, and join all our open datasets.
 

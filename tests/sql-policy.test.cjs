@@ -7,8 +7,7 @@ const vm = require("node:vm");
 const { spawnSync } = require("node:child_process");
 
 const root = path.join(__dirname, "..");
-const html = fs.readFileSync(path.join(root, "index.html"), "utf8");
-const source = html.match(/<script type="module">([\s\S]*?)<\/script>/)[1];
+const source = fs.readFileSync(path.join(root, "assets", "app.js"), "utf8");
 const views = fs.readFileSync(path.join(root, "datasets.csv"), "utf8").trim().split(/\r?\n/).slice(1).map(line => line.match(/^"([^"]+)"/)[1]);
 const presetsSource = source.slice(source.indexOf("    const PRESET_REPORTS"), source.indexOf("    // State"));
 const presets = new Function("CARTA_NTD_ID", presetsSource + "\nreturn PRESET_REPORTS;")("40001");

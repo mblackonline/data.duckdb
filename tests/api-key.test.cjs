@@ -6,7 +6,7 @@ const vm = require("node:vm");
 const { harness } = require("./report-state.test.cjs");
 
 const KEY = "carta_groq_api_key";
-const source = fs.readFileSync(path.join(__dirname, "..", "index.html"), "utf8").match(/<script type="module">([\s\S]*?)<\/script>/)[1];
+const source = fs.readFileSync(path.join(__dirname, "..", "assets", "app.js"), "utf8");
 
 function storageWith(saved) {
   const entries = new Map([["unrelated-setting", "keep"]]);
