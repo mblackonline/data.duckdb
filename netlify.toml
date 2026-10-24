@@ -1,0 +1,12 @@
+[build]
+  command = "node scripts/build-site.cjs"
+  publish = "dist"
+
+[functions]
+  directory = "netlify/functions"
+
+[dev]
+  framework = "#static"
+  publish = "dist"
+  port = 8000
+  autoLaunch = false

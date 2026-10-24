@@ -221,3 +221,7 @@ __marimo__/
 
 # Catalog build candidates and retained previous-catalog backups
 .data.duckdb-build-*/
+
+# Netlify local state and environment variants
+.netlify/
+.env.*
