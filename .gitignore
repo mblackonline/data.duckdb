@@ -218,3 +218,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Catalog build candidates and retained previous-catalog backups
+.data.duckdb-build-*/

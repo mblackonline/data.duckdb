@@ -21,3 +21,28 @@ Here's an example of using data.duckdb to query across multiple tables.  In this
 ## Download
 You can directly download the database here:  
 https://gocarta.s3.us-east-2.amazonaws.com/public/duckdb/data.duckdb
+
+## Rebuilding the catalog safely
+
+Run `run.ps1` on Windows or `run.sh` on Linux from the repository root. Run one
+generation at a time, with other catalog readers and writers closed.
+
+The generator reads and validates `datasets.csv`, then creates a candidate in a
+unique `.data.duckdb-build-*` directory beside the working database. After closing
+and checkpointing the candidate, it reopens it read-only, checks the exact view
+list, and binds every view against its source. This checks the catalog and source
+schemas without claiming that all remote rows have been validated.
+
+Before publishing, it checks that the working catalog has no WAL file and has not
+changed during the build. It copies the previous catalog to `previous.duckdb` in
+the build directory and verifies the copy by SHA-256. Only then does it atomically
+replace `data.duckdb`. A generation, validation, backup, or replacement failure
+returns an error and preserves the working catalog. Close other applications if
+Windows reports that the catalog is locked.
+
+Build directories, failed candidates, and previous-catalog backups are retained.
+Their paths are printed by the generator and ignored by Git for the default
+catalog name. No cleanup deletion is performed automatically. Review these files
+and obtain explicit confirmation before deleting any of them. To restore an older
+catalog, first close catalog connections, then explicitly choose and copy the
+desired `previous.duckdb` backup over `data.duckdb`.

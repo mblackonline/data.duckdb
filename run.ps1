@@ -3,3 +3,4 @@ $ErrorActionPreference = "Stop"
 
 # Run the command
 uv run --env-file .env main.py
+exit $LASTEXITCODE
