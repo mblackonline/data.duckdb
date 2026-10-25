@@ -32,9 +32,15 @@
 
       <h2>Microsoft sign-in and cookies</h2>
       <p>Microsoft handles authentication. This application does not receive your Microsoft password.
-        It temporarily holds account information, including your display name and authentication
-        tokens, in browser memory. It sends an access token to its backend to verify your identity
-        and AI permissions.</p>
+        Microsoft's sign-in library temporarily caches account information, including your display
+        name and authentication tokens, in this browser tab's session storage. This lets the app
+        restore your sign-in after a page refresh. It sends an access token to its backend to verify
+        your identity and AI permissions again before enabling AI.</p>
+      <p>Sign out to clear this app's cached sign-in for the current tab, especially on a shared
+        device. Session storage normally lasts until the tab or window closes, but browser restore
+        features may restore a previous session. Microsoft may also require you to sign in again
+        when a session expires or organizational policy requires it. See
+        <a href="https://learn.microsoft.com/en-us/entra/msal/javascript/browser/caching">Microsoft's sign-in cache documentation</a>.</p>
       <p>Microsoft uses cookies on its sign-in domains to manage authentication and sign-in sessions.
         Whether a session continues after you close your browser depends on your sign-in choices,
         browser settings, and organizational policies.</p>
@@ -65,7 +71,7 @@
         Review your question before submitting it.</p>
 
       <h2>Application storage and provider retention</h2>
-      <p>This version of the application does not create or update persistent user profiles,
+      <p>Aside from the browser sign-in cache described above, this application does not create or update persistent user profiles,
         user hashes, per-user quota counters, report-correction records, or AI activity history.
         Account information, tokens, questions, and responses are processed temporarily to provide
         the current session and requests. The application does not save them in a backend database

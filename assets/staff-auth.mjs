@@ -1,24 +1,24 @@
 const ENDPOINT = "/.netlify/functions/report";
 const DENIED = "AI reporting is not enabled for this account.";
 
-// MSAL owns OAuth, PKCE and token renewal. Tokens stay inside this session.
+// MSAL owns OAuth, PKCE and token renewal, with a cache scoped to this browser tab.
 export async function createStaffSession({ config, onState, library = globalThis.msal, fetchRequest = globalThis.fetch, origin = globalThis.location.origin }) {
   const redirectUri = `${origin}/auth-redirect.html`;
   if (!library || !config.redirectUris?.includes(redirectUri)) throw new Error("Sign-in is unavailable at this address.");
   const pca = new library.PublicClientApplication({
     auth: { clientId: config.webClientId, authority: `https://login.microsoftonline.com/${config.tenantId}`, redirectUri },
-    cache: { cacheLocation: "memoryStorage" },
+    cache: { cacheLocation: "sessionStorage" },
     system: { loggerOptions: { loggerCallback() {}, piiLoggingEnabled: false }, serverTelemetryEnabled: false }
   });
   await pca.initialize();
-  let account = null, authorized = false, revision = 0, checking = null;
+  let account = pca.getActiveAccount(), authorized = false, revision = 0, checking = null;
   const publish = (allowed, message = "", busy = false) => {
     authorized = allowed;
     onState({ signedIn: !!account, name: account?.name || "Signed-in user", authorized, message, busy });
   };
   const token = () => pca.acquireTokenSilent({ account, scopes: [config.apiScope], cacheLookupPolicy: library.CacheLookupPolicy.AccessTokenAndRefreshToken });
 
-  async function checkAccess() {
+  async function checkAccess(restoring = false) {
     const attempt = ++revision;
     checking?.abort();
     checking = new AbortController();
@@ -38,11 +38,15 @@ export async function createStaffSession({ config, onState, library = globalThis
     } catch (error) {
       if (attempt !== revision) return;
       const network = ["network_error", "no_network_connectivity", "endpoints_resolution_error"].includes(error.errorCode) || error instanceof TypeError;
-      publish(false, network ? "AI access could not be checked. Sign out and sign in again to retry." : DENIED);
+      publish(false, network ? "AI access could not be checked. Sign out and sign in again to retry."
+        : restoring ? "Your sign-in needs attention. Sign out and sign in again." : DENIED);
     }
   }
 
   publish(false);
+  // Restore only the previously selected account. A cached identity never grants AI access:
+  // renew its token and recheck the backend without opening a sign-in popup on page load.
+  if (account) void checkAccess(true);
   return {
     async signIn() {
       const attempt = ++revision;

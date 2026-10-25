@@ -9,23 +9,24 @@ const KEY = 'carta_groq_api_key';
 const config = { tenantId: 'tenant', webClientId: 'web', apiScope: 'api://api/Reports.Generate', redirectUris: ['http://localhost:8000/auth-redirect.html'] };
 function deferred() { let resolve, reject; const promise = new Promise((yes, no) => {resolve = yes; reject = no;}); return {promise, resolve, reject}; }
 const tick = () => new Promise(setImmediate);
-async function setup({ login, acquire, fetchRequest, logout } = {}) {
+async function setup({ login, acquire, fetchRequest, logout, cache = { activeAccount: null } } = {}) {
   const states = [], calls = [], requests = []; let cacheClears = 0, options;
   const account = { name: 'POC tester', homeAccountId: 'test-user' };
   const library = { CacheLookupPolicy: {AccessTokenAndRefreshToken: 3}, PublicClientApplication: class {
     constructor(value) { options = value; }
     async initialize() {}
-    setActiveAccount() {}
+    getActiveAccount() { return cache.activeAccount; }
+    setActiveAccount(value) { cache.activeAccount = value; }
     async loginPopup(request) { calls.push(['login', request]); return login ? login(request) : {account}; }
     async acquireTokenSilent(request) { calls.push(['token', request]); return acquire ? acquire(request) : {accessToken: 'fake-access-token'}; }
     async logoutPopup(request) { calls.push(['logout', request]); if (logout) return logout(request); }
-    async clearCache() { cacheClears++; }
+    async clearCache() { cacheClears++; cache.activeAccount = null; }
   }};
   const {createStaffSession} = await modulePromise;
   const session = await createStaffSession({ config, library, origin: 'http://localhost:8000', onState: state => states.push(state),
     fetchRequest: async (url, request) => {requests.push({url, ...request}); return fetchRequest ? fetchRequest(url, request) : Response.json(request.method === 'POST' ? {sql: 'SELECT 1', model: 'openai/gpt-oss-120b'} : {authorized: true});}
   });
-  return {session, states, calls, requests, get options() {return options;}, get cacheClears() {return cacheClears;}};
+  return {session, states, calls, requests, cache, get options() {return options;}, get cacheClears() {return cacheClears;}};
 }
 
 test('legacy key cleanup removes only the app record, without reading or restoring keys', () => {
@@ -51,12 +52,59 @@ test('key entry, remember/forget controls and browser Groq calls are removed', (
   assert.match(html, /id="tab-ai"[^>]* hidden/);
 });
 
-test('Microsoft session uses tenant authority, dedicated callback, memory cache and no automatic login', async () => {
+test('Microsoft session uses tenant authority, dedicated callback, tab session cache and no automatic login', async () => {
   const h = await setup(); assert.equal(h.options.auth.authority, 'https://login.microsoftonline.com/tenant');
-  assert.equal(h.options.auth.redirectUri, config.redirectUris[0]); assert.equal(h.options.cache.cacheLocation, 'memoryStorage');
+  assert.equal(h.options.auth.redirectUri, config.redirectUris[0]); assert.equal(h.options.cache.cacheLocation, 'sessionStorage');
   assert.equal(h.options.system.loggerOptions.piiLoggingEnabled, false);
   assert.equal(h.states.at(-1).authorized, false); assert.equal(h.states.at(-1).signedIn, false);
   await assert.rejects(h.session.requestReport({}), /not enabled/); assert.equal(h.requests.length, 0); assert.equal(h.calls.length, 0);
+});
+
+test('refresh restores the selected account and rechecks authorization without an interactive login', async () => {
+  const first = await setup(); await first.session.signIn();
+  const refreshed = await setup({cache: first.cache}); await tick();
+  assert.equal(refreshed.states.at(-1).signedIn, true);
+  assert.equal(refreshed.states.at(-1).authorized, true);
+  assert.equal(refreshed.calls.filter(call => call[0] === 'login').length, 0);
+  assert.equal(refreshed.calls.filter(call => call[0] === 'token').length, 1);
+  assert.equal(refreshed.requests.length, 1); assert.equal(refreshed.requests[0].method, undefined);
+  assert(!JSON.stringify(refreshed.states).includes('fake-access-token'));
+});
+
+test('cached identity stays unauthorized until a fresh backend probe completes', async () => {
+  const gate = deferred();
+  const h = await setup({cache: {activeAccount: {name: 'Cached user'}, authorized: true}, fetchRequest: () => gate.promise});
+  await tick();
+  assert.equal(h.states.at(-1).busy, true); assert.equal(h.states.at(-1).authorized, false);
+  await assert.rejects(h.session.requestReport({}), /not enabled/);
+  gate.resolve(Response.json({authorized: true})); await tick();
+  assert.equal(h.states.at(-1).authorized, true);
+});
+
+for (const status of [401, 403, 503]) test('refresh cannot restore AI access after backend HTTP ' + status, async () => {
+  const h = await setup({cache: {activeAccount: {name: 'Cached user'}}, fetchRequest: () => Response.json({}, {status})});
+  await tick();
+  assert.equal(h.states.at(-1).authorized, false);
+  assert.equal(h.calls.filter(call => call[0] === 'login').length, 0);
+  await assert.rejects(h.session.requestReport({}), /not enabled/);
+});
+
+test('an expired cached session requests deliberate sign-in without opening a popup', async () => {
+  const h = await setup({cache: {activeAccount: {name: 'Cached user'}}, acquire: () => { throw Error('private session details'); }});
+  await tick();
+  assert.equal(h.states.at(-1).authorized, false);
+  assert.equal(h.states.at(-1).message, 'Your sign-in needs attention. Sign out and sign in again.');
+  assert.equal(h.requests.length, 0); assert.equal(h.calls.filter(call => call[0] === 'login').length, 0);
+});
+
+test('sign-out during refresh authorization prevents a late response from restoring AI', async () => {
+  const gate = deferred();
+  const h = await setup({cache: {activeAccount: {name: 'Cached user'}}, fetchRequest: () => gate.promise});
+  await tick(); await h.session.signOut();
+  gate.resolve(Response.json({authorized: true})); await tick();
+  assert.equal(h.states.at(-1).signedIn, false); assert.equal(h.states.at(-1).authorized, false);
+  const refreshed = await setup({cache: h.cache}); await tick();
+  assert.equal(refreshed.states.at(-1).signedIn, false); assert.equal(refreshed.requests.length, 0);
 });
 
 test('identity sign-in and custom API authorization are separate, and token values never enter UI state', async () => {

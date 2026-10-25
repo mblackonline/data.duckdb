@@ -22,7 +22,7 @@ const staticFiles = new Map([
   ["/assets/msal-browser.min.js", { type: "text/javascript", body: `
     globalThis.fixtureAuthMode = 'authorized';
     globalThis.msal = {CacheLookupPolicy: {AccessTokenAndRefreshToken: 3}, PublicClientApplication: class {
-      async initialize() {} setActiveAccount() {} async clearCache() {}
+      async initialize() {} getActiveAccount() {return null;} setActiveAccount() {} async clearCache() {}
       async loginPopup() {return {account: {name: 'POC tester', homeAccountId: 'fixture-user'}};}
       async acquireTokenSilent() {return {accessToken: 'fixture-microsoft-access-token'};}
       async logoutPopup() {}

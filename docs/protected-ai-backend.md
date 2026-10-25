@@ -17,6 +17,18 @@ the `Reports.Generate` scope, `AI.ReportUser` role and user identity claims.
 Administrator status does not bypass these checks. Removing a role may not
 remove access until an already issued token expires.
 
+MSAL caches authentication tokens and account information in the current tab's
+`sessionStorage`, so refreshing the page can restore the selected account. The
+frontend silently acquires an API token and checks backend authorization again
+before enabling AI; cached account details never grant access on their own. It
+does not launch an interactive sign-in popup on refresh. Expired sessions or
+access-check failures leave AI unavailable and require user action. Sign-out
+clears the selected account and MSAL cache for that account in the current tab.
+The application does not configure MSAL to use `localStorage`. Browser session
+restore can preserve tab storage, so shared-device users should explicitly sign
+out. This authentication cache does not store questions, reports, usage history,
+or the Groq key. See [Microsoft's cache guidance](https://learn.microsoft.com/en-us/entra/msal/javascript/browser/caching).
+
 Configure these server environment variables:
 
 | Variable | Purpose |
@@ -97,6 +109,13 @@ node --test --test-reporter=spec tests/protected-api.test.mjs
 
 These tests use fixture tokens and mocked provider responses. Use the
 [deployment checks](netlify-hosting.md#5-verify) to verify a live environment.
+
+For an offline browser cache check, run
+`node tests/staff-session-browser.cjs C:\path\to\temporary-test-dependencies`,
+where the temporary prefix contains `playwright-core` and Chrome is installed.
+It uses the installed MSAL library with fake authentication tokens to check
+same-tab refresh, a separate tab, backend denial, and cache clearing on sign-out.
+External network requests are blocked; it does not test a real Microsoft login.
 
 ## References
 

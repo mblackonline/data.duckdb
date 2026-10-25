@@ -98,6 +98,11 @@ Test at the primary HTTPS site URL, whose callback is registered in Entra:
 - Public reports, pagination and full CSV export work without sign-in.
 - AI is hidden while signed out. An authorized user can sign in and generate a
   report; an unassigned user cannot use AI. Sign-out hides AI and cancels pending AI work.
+- Refresh the same signed-in tab. AI remains hidden until the restored Microsoft
+  session passes a fresh backend authorization check, then becomes available
+  without another interactive sign-in. Sign out and refresh again to confirm
+  this app stays signed out. Browser session restore may preserve tab storage;
+  explicitly sign out on shared devices.
 - AI requests go to `/.netlify/functions/report`, without exposing a provider key
   or calling Groq directly from the browser.
 - The callback loads without a URL rewrite or `Cross-Origin-Opener-Policy` header.
