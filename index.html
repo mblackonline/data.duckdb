@@ -190,10 +190,6 @@
       <p id="csvExportStatus" class="panel-subtitle" role="status" aria-live="polite" aria-atomic="true"></p>
       <div id="errorBanner" class="error-banner" role="alert" aria-atomic="true"></div>
 
-      <div id="tableContainer" class="table-container" role="region" aria-label="Report results" aria-describedby="resultsSummary" tabindex="0">
-        <div class="empty-state">Choose a report above to get started.</div>
-      </div>
-
       <div id="reportPagination" class="report-pagination" role="group" aria-label="Report page navigation" hidden>
         <div class="form-group">
           <label for="rowsPerPage">Rows per page</label>
@@ -210,6 +206,10 @@
           <span id="pageStatus" role="status" aria-live="polite" aria-atomic="true">No page loaded</span>
           <button id="nextPageBtn" class="btn btn-secondary" disabled>Next</button>
         </div>
+      </div>
+
+      <div id="tableContainer" class="table-container" role="region" aria-label="Report results" aria-describedby="resultsSummary" tabindex="0">
+        <div class="empty-state">Choose a report above to get started.</div>
       </div>
 
       <details class="report-details" id="reportDetails">

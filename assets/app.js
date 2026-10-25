@@ -904,7 +904,7 @@
         exportCsvBtn.disabled = activeCsvExport !== null;
         quickSearchInput.disabled = currentRows.length === 0;
         if (page) {
-          reportPagination.hidden = !page.previous.length && !result.hasMore;
+          reportPagination.hidden = false;
           const number = page.previous.length + 1;
           pageStatus.textContent = currentRows.length
             ? `Page ${number} · Rows ${(page.offset + 1).toLocaleString()}–${(page.offset + currentRows.length).toLocaleString()} · ${result.hasMore ? "more available" : "end of results"}`

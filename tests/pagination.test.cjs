@@ -56,15 +56,33 @@ test("page-size changes restart at the first page without adding a report LIMIT"
   assert.equal(h.ui.sqlQueryBox.value, "SELECT * FROM data.simple_bus_stops");
 });
 
-test("empty, exact-size, and one-extra-row pages expose correct navigation", async () => {
-  for (const count of [0, 100, 101]) {
+test("empty, single-page, exact-size, and multiple-page reports keep page controls available", async () => {
+  for (const count of [0, 40, 100, 101]) {
     const h = harness();
     await open(h, Array.from({ length: count }, (_, id) => ({ id })));
     assert.equal(h.state().rows.length, Math.min(count, 100));
     assert.equal(h.state().report.page.hasMore, count > 100);
+    assert.equal(h.ui.reportPagination.hidden, false);
+    assert.equal(h.ui.rowsPerPage.disabled, false);
     assert(h.ui.previousPageBtn.disabled);
     assert.equal(h.ui.nextPageBtn.disabled, count <= 100);
   }
+});
+
+test("a report that fits on one page can switch to smaller pages and back", async () => {
+  const h = harness(); h.ui.rowsPerPage.value = "1000";
+  const rows = Array.from({ length: 650 }, (_, id) => ({ id }));
+  await open(h, rows);
+  assert.equal(h.ui.reportPagination.hidden, false);
+  assert(h.ui.previousPageBtn.disabled && h.ui.nextPageBtn.disabled);
+  const smaller = h.changePageSize(100); await respond(h, rows); await smaller;
+  assert.equal(h.state().rows.length, 100);
+  assert.equal(h.ui.nextPageBtn.disabled, false);
+  const larger = h.changePageSize(1000); await respond(h, rows); await larger;
+  assert.equal(h.state().rows.length, 650);
+  assert.equal(h.ui.reportPagination.hidden, false);
+  assert.equal(h.ui.rowsPerPage.disabled, false);
+  assert(h.ui.previousPageBtn.disabled && h.ui.nextPageBtn.disabled);
 });
 
 test("page search does not restrict the default report download", async () => {
@@ -127,9 +145,11 @@ test("page failures invalidate old exports and navigation", async () => {
   const h = harness();
   await open(h, Array.from({ length: 250 }, (_, id) => ({ id })));
   const next = h.next(); await new Promise(setImmediate);
+  assert.equal(h.ui.reportPagination.hidden, true);
   h.queries.at(-1).reject(Error("next-page source failure")); await next;
   assert.deepEqual(h.state().rows, []);
   assert.equal(h.state().report, null);
+  assert.equal(h.ui.reportPagination.hidden, true);
   assert(h.ui.previousPageBtn.disabled && h.ui.nextPageBtn.disabled && h.ui.exportCsvBtn.disabled);
   assert.match(h.ui.errorBanner.textContent, /next-page source failure/);
 });

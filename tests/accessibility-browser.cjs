@@ -220,6 +220,7 @@ async function main() {
     await page.evaluate(() => { globalThis.fixtureHold = true; });
     await page.keyboard.press("Enter");
     await page.locator("#resultsSummary").filter({ hasText: "Loading report..." }).waitFor();
+    assert.equal(await page.locator("#reportPagination").isVisible(), false);
     assert.equal(await page.locator("#resultsTitle").textContent(), "Bus routes");
     assert.equal(await page.locator("#stopReportBtn").isVisible(), true);
     assert.equal(await page.locator("#resultsSummary").getAttribute("role"), "status");
@@ -227,12 +228,17 @@ async function main() {
     await page.waitForFunction(() => typeof globalThis.fixtureFinish === "function");
     await page.evaluate(() => { globalThis.fixtureHold = false; globalThis.fixtureFinish(); });
     await page.locator("#resultsSummary").filter({ hasText: /^40 results$/ }).waitFor();
-    assert.equal(await page.locator("#reportPagination").isVisible(), false);
+    assert.equal(await page.locator("#reportPagination").isVisible(), true);
+    assert.equal(await page.locator("#rowsPerPage").isEnabled(), true);
+    assert(await page.locator("#previousPageBtn").isDisabled());
+    assert(await page.locator("#nextPageBtn").isDisabled());
+    assert(await page.locator("#reportPagination").evaluate(element => Boolean(element.compareDocumentPosition(document.querySelector("#tableContainer")) & Node.DOCUMENT_POSITION_FOLLOWING)));
     assert.equal(await page.locator("#stopReportBtn").isVisible(), false);
     assert.equal(await page.locator("#resultsFreshnessSummary").textContent(), "Source update time unavailable.");
     assert.equal(await page.locator("#resultsMeta").isVisible(), false);
     assert.equal(await page.locator("#csvExportHelp").isVisible(), false);
     await page.screenshot({ path: path.join(output, "simplified-reports-desktop.png"), fullPage: true });
+    await page.locator(".results-card").screenshot({ path: path.join(output, "pagination-top-desktop.png") });
     assert(await routes.evaluate(element => element === document.activeElement), "Report completion must preserve focus");
     assert.equal(await page.locator("th[scope=col]").count(), 3);
     const quickFilter = page.getByRole("textbox", { name: "Search this page", exact: true });
@@ -306,6 +312,7 @@ async function main() {
       await audit(`${width}px layout`);
     }
     await page.screenshot({ path: path.join(output, "accessibility-320px.png"), fullPage: true });
+    await page.locator(".results-card").screenshot({ path: path.join(output, "pagination-top-mobile.png") });
     console.log("PASS: no detected axe WCAG A/AA violations in tested states; page reflows at 640px and 320px");
 
     await page.setViewportSize({ width: 1280, height: 1000 });
@@ -366,12 +373,32 @@ async function main() {
     await page.locator("#panel-ai").screenshot({ path: path.join(output, "ai-screen-mobile.png") });
     await page.setViewportSize({ width: 1280, height: 1000 });
     await quickFilter.fill("");
+    await page.evaluate(() => globalThis.fixtureSetRows(650));
+    await page.locator("#tab-builder").click();
+    await page.locator("#runBuilderBtn").click();
+    await page.locator("#rowsPerPage").focus();
+    await page.locator("#rowsPerPage").selectOption("1000");
+    await page.locator("#pageStatus").filter({ hasText: /Rows 1.*650.*end of results/ }).waitFor();
+    assert.equal(await page.locator("#reportPagination").isVisible(), true);
+    assert(await page.locator("#previousPageBtn").isDisabled());
+    assert(await page.locator("#nextPageBtn").isDisabled());
+    assert.equal(await focusedId(), "rowsPerPage");
+    await page.locator("#rowsPerPage").selectOption("100");
+    await page.locator("#pageStatus").filter({ hasText: /Rows 1.*100.*more available/ }).waitFor();
+    assert.equal(await page.locator("#nextPageBtn").isEnabled(), true);
+    await page.locator("#rowsPerPage").selectOption("1000");
+    await page.locator("#pageStatus").filter({ hasText: /Rows 1.*650.*end of results/ }).waitFor();
+    assert.equal(await focusedId(), "rowsPerPage");
+    await audit("Single-page controls after changing page size");
+    await page.locator("#rowsPerPage").selectOption("100");
+    await page.locator("#pageStatus").filter({ hasText: /Rows 1.*100.*more available/ }).waitFor();
+    console.log("PASS: a single-page report keeps pagination above the table and supports changing page size without losing keyboard focus");
     await page.evaluate(() => globalThis.fixtureSetRows(6505));
     await page.locator("#tab-builder").click();
     await page.getByRole("button", { name: "Run Report", exact: true }).click();
     await page.locator("#resultsSummary").filter({ hasText: /^100 rows on this page$/ }).waitFor();
     assert.equal(await page.locator("#reportPagination").isVisible(), true);
-    assert(await page.locator("#reportPagination").evaluate(element => Boolean(document.querySelector("#tableContainer").compareDocumentPosition(element) & Node.DOCUMENT_POSITION_FOLLOWING)));
+    assert(await page.locator("#reportPagination").evaluate(element => Boolean(element.compareDocumentPosition(document.querySelector("#tableContainer")) & Node.DOCUMENT_POSITION_FOLLOWING)));
     await page.getByLabel("Rows per page", { exact: true }).selectOption("1000");
     await page.locator("#resultsSummary").filter({ hasText: /^1,000 rows on this page$/ }).waitFor();
     for (let number = 2; number <= 7; number++) {
