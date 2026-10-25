@@ -1452,7 +1452,10 @@ FROM parsed ORDER BY "trip_id";`;
       } finally {
         await statement.close();
       }
-      validateCartaSqlAst(parsed, availableViews);
+      const usesSpatial = validateCartaSqlAst(parsed, availableViews);
+      // Wasm downloads and loads this fixed extension on demand. Only validated
+      // spatial functions trigger it; report SQL cannot INSTALL or LOAD anything.
+      if (usesSpatial) await queryConnection.query("LOAD spatial");
       return parsed;
     }
 
@@ -1483,10 +1486,11 @@ FROM parsed ORDER BY "trip_id";`;
         "nullif", "coalesce", "ifnull", "if", "greatest", "least",
         "date_part", "date_trunc", "date_diff", "date_sub", "date_add", "strftime", "strptime", "try_strptime", "epoch", "epoch_ms", "to_timestamp", "make_date", "make_timestamp", "year", "month", "day", "dayofweek", "dayname", "monthname", "quarter", "week", "last_day", "current_date", "current_timestamp", "now", "timezone",
         "row_number", "rank", "dense_rank", "percent_rank", "cume_dist", "ntile", "lag", "lead", "first_value", "last_value", "nth_value",
-        "st_distance", "st_distance_sphere", "st_dwithin", "st_intersects", "st_contains", "st_within", "st_x", "st_y", "st_astext", "st_asgeojson", "st_point", "st_area", "st_length", "st_centroid"
+        "st_distance", "st_distance_sphere", "st_dwithin", "st_intersects", "st_contains", "st_within", "st_x", "st_y", "st_astext", "st_asgeojson", "st_point", "st_geomfromtext", "st_transform", "st_area", "st_length", "st_centroid"
       ]);
       const allowedExpressions = new Set(["CONSTANT", "COLUMN_REF", "STAR", "CAST", "CASE", "COMPARISON", "CONJUNCTION", "OPERATOR", "FUNCTION", "WINDOW", "SUBQUERY", "BETWEEN", "COLLATE", "LAMBDA", "TYPE"]);
       let visited = 0;
+      let usesSpatial = false;
       const reject = (message) => { throw new Error(message); };
       const checkSize = () => { if (++visited > 10000) reject("The SQL query is too complex."); };
 
@@ -1509,6 +1513,7 @@ FROM parsed ORDER BY "trip_id";`;
           if (!["", "main"].includes(schema) || value.catalog || !builtinPath || !allowedFunctions.has(value.function_name?.toLowerCase())) {
             reject(`Function is not permitted in CARTA reports: ${value.function_name || "unknown"}.`);
           }
+          if (value.function_name.toLowerCase().startsWith("st_")) usesSpatial = true;
         }
         let readsCarta = false;
         for (const child of Object.values(value)) readsCarta = inspectValue(child, scope) || readsCarta;
@@ -1591,6 +1596,7 @@ FROM parsed ORDER BY "trip_id";`;
       }
 
       if (!inspectQuery(parsed.statements[0].node)) reject("The query must read a CARTA dataset; comments, literals, and unused CTEs do not count as data sources.");
+      return usesSpatial;
     }
 
     async function generateSqlWithBackend(question, retryError = "", requestId = null, generation = null, signal = null) {
