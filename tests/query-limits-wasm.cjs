@@ -30,7 +30,7 @@ async function engine() {
   const h = harness();
   Object.assign(h.ui, { actualDb: db, actualConn: conn, actualWorker: worker });
   vm.runInContext("db=actualDb;conn=actualConn;duckdbWorker=actualWorker;availableViews=['simple_bus_routes'];", h.ui);
-  vm.runInContext(source.slice(source.indexOf("    async function validateCartaSql("), source.indexOf("    async function callGroqChat(")), h.ui);
+  vm.runInContext(source.slice(source.indexOf("    async function validateCartaSql("), source.indexOf("    async function generateSqlWithBackend(")), h.ui);
   return { h, db, worker };
 }
 

@@ -8,6 +8,8 @@ const { createRequire } = require("node:module");
 
 assert(process.argv[2], "Provide a temporary npm prefix containing browser test dependencies.");
 const prefix = path.resolve(process.argv[2]);
+const output = path.join(__dirname, "..", ".netlify", "frontend-verification");
+fs.mkdirSync(output, {recursive: true});
 const requireTemp = createRequire(path.join(prefix, "verify.cjs"));
 const { chromium } = requireTemp("playwright-core");
 const AxeBuilder = requireTemp("@axe-core/playwright").default;
@@ -16,6 +18,15 @@ const staticFiles = new Map([
   ["/", { type: "text/html; charset=utf-8", body: fs.readFileSync(path.join(root, "index.html")) }],
   ["/assets/styles.css", { type: "text/css; charset=utf-8", body: fs.readFileSync(path.join(root, "assets", "styles.css")) }],
   ["/assets/app.js", { type: "text/javascript; charset=utf-8", body: fs.readFileSync(path.join(root, "assets", "app.js")) }],
+  ["/assets/staff-auth.mjs", { type: "text/javascript", body: fs.readFileSync(path.join(root, "assets/staff-auth.mjs")) }],
+  ["/assets/msal-browser.min.js", { type: "text/javascript", body: `
+    globalThis.fixtureAuthMode = 'authorized';
+    globalThis.msal = {CacheLookupPolicy: {AccessTokenAndRefreshToken: 3}, PublicClientApplication: class {
+      async initialize() {} setActiveAccount() {} async clearCache() {}
+      async loginPopup() {return {account: {name: 'POC tester', homeAccountId: 'fixture-user'}};}
+      async acquireTokenSilent() {return {accessToken: 'fixture-microsoft-access-token'};}
+      async logoutPopup() {}
+    }};` }],
   ["/mock-worker.js", { type: "text/javascript; charset=utf-8", body: "" }]
 ]);
 const baseline = process.argv.includes("--baseline");
@@ -69,7 +80,12 @@ const fixtureModule = `
 
 async function main() {
   const server = http.createServer((request, response) => {
-    const file = staticFiles.get(new URL(request.url, "http://localhost").pathname);
+    const pathname = new URL(request.url, "http://localhost").pathname;
+    if (pathname === '/assets/staff-config.json') {
+      response.writeHead(200, {'Content-Type': 'application/json'});
+      response.end(JSON.stringify({tenantId: 'tenant', webClientId: 'web', apiScope: 'api://api/Reports.Generate', redirectUris: ['http://' + request.headers.host + '/auth-redirect.html']})); return;
+    }
+    const file = staticFiles.get(pathname);
     response.setHeader("X-Content-Type-Options", "nosniff");
     response.setHeader("Cache-Control", "no-store");
     response.writeHead(file ? 200 : 404, { "Content-Type": file?.type || "text/plain; charset=utf-8" });
@@ -86,18 +102,22 @@ async function main() {
     page.setDefaultTimeout(10000);
     const errors = [];
     page.on("pageerror", error => errors.push(error.message));
-    let aiResponseGate = null, aiRequests = 0;
+    let aiResponseGate = null, aiRequests = 0, authResponseGate = null, releaseAuth;
     await context.route("**/*", async route => {
       const url = route.request().url();
-      if (url.startsWith(origin + "/")) return route.continue();
-      if (url.startsWith("https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@")) return route.fulfill({ contentType: "text/javascript", body: fixtureModule });
-      if (url === "https://api.groq.com/openai/v1/chat/completions") {
-        const headers = { "Access-Control-Allow-Origin": origin, "Access-Control-Allow-Headers": "authorization,content-type", "Access-Control-Allow-Methods": "POST,OPTIONS" };
-        if (route.request().method() === "OPTIONS") return route.fulfill({ status: 204, headers });
+      if (url === origin + '/.netlify/functions/report') {
+        assert.equal(route.request().headers().authorization, 'Bearer fixture-microsoft-access-token');
+        const mode = await page.evaluate(() => globalThis.fixtureAuthMode);
+        if (route.request().method() === 'GET') {
+          if (authResponseGate) await authResponseGate;
+          return route.fulfill({status: mode === 'unauthorized' ? 403 : 200, contentType: 'application/json', body: JSON.stringify({authorized: mode !== 'unauthorized'})});
+        }
         aiRequests++;
         if (aiResponseGate) await aiResponseGate;
-        return route.fulfill({ contentType: "application/json", headers, body: JSON.stringify({ choices: [{ message: { content: "SELECT * FROM data.simple_bus_routes" } }] }) });
+        return route.fulfill({status: mode === 'revoked' ? 403 : 200, contentType: 'application/json', body: JSON.stringify({sql: 'SELECT * FROM data.simple_bus_routes', model: 'openai/gpt-oss-120b', reportId: 'fixture-report'})});
       }
+      if (url.startsWith(origin + "/")) return route.continue();
+      if (url.startsWith("https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@")) return route.fulfill({ contentType: "text/javascript", body: fixtureModule });
       return route.abort();
     });
     const cssLoaded = page.waitForResponse(`${origin}/assets/styles.css`);
@@ -142,6 +162,35 @@ async function main() {
       assert.equal(await page.locator('[role="tab"][tabindex="0"]').count(), 1);
       assert.equal(await page.getByRole("tabpanel").count(), 1);
     };
+    await page.waitForFunction(() => !document.querySelector('#staffSignInBtn').disabled);
+    assert.equal(await page.locator('#tab-ai').isVisible(), false);
+    assert.equal(await page.locator('#panel-ai').isVisible(), false);
+    await page.locator('#tab-presets').focus(); await page.keyboard.press('End');
+    assert.equal(await focusedId(), 'tab-builder');
+    await page.keyboard.press('ArrowRight'); assert.equal(await focusedId(), 'tab-presets');
+    await audit('Signed-out public reporting');
+    await page.screenshot({path: path.join(output, 'staff-signed-out.png'), fullPage: true});
+    await page.evaluate(() => globalThis.fixtureAuthMode = 'unauthorized');
+    await page.locator('#staffSignInBtn').click();
+    await page.getByText('AI reporting is not enabled for this account.', {exact: true}).waitFor();
+    assert.equal(await page.locator('#tab-ai').isVisible(), false);
+    assert.equal(await page.locator('#staffName').textContent(), 'POC tester');
+    assert.equal(await page.locator('#staffSignOutBtn').isVisible(), true);
+    assert.equal(await page.getByRole('button', {name: /request access/i}).count(), 0);
+    await audit('Signed in without application access');
+    await page.screenshot({path: path.join(output, 'staff-unauthorized.png'), fullPage: true});
+    await page.locator('#staffSignOutBtn').click();
+    await page.waitForFunction(() => !document.querySelector('#staffSignInBtn').hidden && !document.querySelector('#staffSignInBtn').disabled);
+    await page.evaluate(() => globalThis.fixtureAuthMode = 'authorized');
+    authResponseGate = new Promise(resolve => {releaseAuth = resolve;});
+    await page.locator('#staffSignInBtn').click();
+    await page.getByText('Checking AI access...', {exact: true}).waitFor();
+    assert.equal(await page.locator('#tab-ai').isVisible(), false);
+    releaseAuth(); authResponseGate = null;
+    await page.locator('#tab-ai').waitFor();
+    await audit('Signed in with confirmed application access');
+    await page.screenshot({path: path.join(output, 'staff-authorized.png'), fullPage: true});
+    await page.locator('#staffSignOutBtn').focus();
     await page.keyboard.press("Tab"); await selected("tab-presets");
     await page.keyboard.press("ArrowRight"); await selected("tab-builder");
     await page.keyboard.press("Tab"); assert.equal(await focusedId(), "panel-builder");
@@ -181,7 +230,7 @@ async function main() {
     assert.equal(await page.locator("#resultsFreshnessSummary").textContent(), "Source update time unavailable.");
     assert.equal(await page.locator("#resultsMeta").isVisible(), false);
     assert.equal(await page.locator("#csvExportHelp").isVisible(), false);
-    await page.screenshot({ path: path.join(prefix, "simplified-reports-desktop.png"), fullPage: true });
+    await page.screenshot({ path: path.join(output, "simplified-reports-desktop.png"), fullPage: true });
     assert(await routes.evaluate(element => element === document.activeElement), "Report completion must preserve focus");
     assert.equal(await page.locator("th[scope=col]").count(), 3);
     const quickFilter = page.getByRole("textbox", { name: "Search this page", exact: true });
@@ -228,48 +277,30 @@ async function main() {
       }
       await audit(`${width}px layout`);
     }
-    await page.screenshot({ path: path.join(prefix, "accessibility-320px.png"), fullPage: true });
+    await page.screenshot({ path: path.join(output, "accessibility-320px.png"), fullPage: true });
     console.log("PASS: no detected axe WCAG A/AA violations in tested states; page reflows at 640px and 320px");
 
     await page.setViewportSize({ width: 1280, height: 1000 });
     const settings = page.locator("#aiSettings");
     const question = page.getByRole("textbox", { name: "Your question", exact: true });
     const create = page.getByRole("button", { name: "Create report", exact: true });
-    assert.equal(await settings.evaluate(element => element.open), true);
+    assert.equal(await settings.evaluate(element => element.open), false);
+    assert.equal(await page.locator('#groqApiKeyInput').count(), 0);
+    assert.equal(await page.locator('#saveGroqKeyBtn').count(), 0);
+    assert.equal(await page.locator('#forgetGroqKeyBtn').count(), 0);
     assert.equal(await page.locator("#aiPrivacyDetails").evaluate(element => element.open), false);
     assert.equal(await page.locator("#panel-ai .chip").count(), 3);
     assert((await question.boundingBox()).y < (await settings.boundingBox()).y);
     await page.getByRole("button", { name: "Ridership by mode", exact: true }).click();
     assert((await question.inputValue()).includes("2024"));
-    assert(await question.evaluate(element => element === document.activeElement));
-    assert.equal(aiRequests, 0, "Examples must not submit requests");
-    await create.click();
-    assert.equal(await focusedId(), "groqApiKeyInput");
-    assert.equal(aiRequests, 0);
-    assert.equal(await settings.evaluate(element => element.open), true);
-    await question.fill("Show CARTA Bus Routes");
-    await create.click();
+    assert(await question.evaluate(element => element === document.activeElement)); assert.equal(aiRequests, 0);
+    await question.fill("Show CARTA Bus Routes"); await create.click();
     await page.getByText("Report ready (standard report; no AI request).", { exact: true }).waitFor();
-    assert.equal(aiRequests, 0, "Exact standard browsing requests do not need an AI call or key");
-    assert.equal(await page.getByLabel("API key for Groq (AI provider)", { exact: true }).inputValue(), "");
-    await page.getByLabel("API key for Groq (AI provider)", { exact: true }).fill("gsk_browser_fixture_only");
-    await page.getByRole("button", { name: "Remember on this device", exact: true }).click();
-    await page.reload();
-    await page.getByText("Connected (1 CARTA datasets ready)", { exact: true }).waitFor();
-    await page.locator("#tab-ai").click();
-    assert.equal(await settings.evaluate(element => element.open), false);
-    assert.equal(await page.locator("#aiKeySummary").textContent(), "Key entered");
-    assert(!await page.getByLabel("API key for Groq (AI provider)", { exact: true }).isVisible());
-    await page.locator("#aiSettings > summary").focus();
-    await page.keyboard.press("Enter");
-    assert(await page.getByLabel("API key for Groq (AI provider)", { exact: true }).isVisible());
-    await page.keyboard.press("Enter");
-    assert.equal(await settings.evaluate(element => element.open), false);
-    await page.locator("#aiPrivacyDetails > summary").focus();
-    await page.keyboard.press("Enter");
-    assert(await page.getByText(/Your question, selected table schemas/).isVisible());
-    await page.keyboard.press("Enter");
-    assert(await page.locator("#aiPrivacyWarning").isVisible());
+    assert.equal(aiRequests, 0);
+    await page.locator("#aiSettings > summary").focus(); await page.keyboard.press("Enter");
+    assert(await page.locator('#groqModelSelect').isVisible()); await page.keyboard.press('Enter');
+    await page.locator("#aiPrivacyDetails > summary").focus(); await page.keyboard.press("Enter");
+    assert(await page.getByText(/Your question, selected table schemas/).isVisible()); await page.keyboard.press('Enter');
     await question.fill("List CARTA routes sorted by name");
     await page.keyboard.press("Shift+Enter");
     assert((await question.inputValue()).includes("\n"));
@@ -277,7 +308,7 @@ async function main() {
     assert.equal(aiRequests, 0, "Newlines and IME composition must not submit requests");
     await page.evaluate(() => { globalThis.fixtureHold = true; globalThis.fixtureFinish = null; });
     aiResponseGate = new Promise(resolve => { releaseAiResponse = resolve; });
-    const requestStarted = page.waitForRequest("https://api.groq.com/openai/v1/chat/completions");
+    const requestStarted = page.waitForRequest(origin + "/.netlify/functions/report");
     await page.keyboard.press("Enter");
     await requestStarted;
     assert.equal(await page.locator("#aiStatusText").textContent(), "Preparing report...");
@@ -296,20 +327,17 @@ async function main() {
     assert.equal(await page.locator("#csvExportHelp").isVisible(), true);
     await page.locator("#downloadHelp > summary").click();
     assert.equal(await settings.evaluate(element => element.open), false);
-    await audit("Simplified AI panel, remembered key and ready report");
-    await page.locator("#panel-ai").screenshot({ path: path.join(prefix, "ai-screen-desktop.png") });
+    await audit("Authorized AI panel and ready report");
+    await page.locator("#panel-ai").screenshot({ path: path.join(output, "ai-screen-desktop.png") });
     await page.locator("#aiSettings > summary").click();
-    await page.getByRole("button", { name: "Forget key", exact: true }).click();
-    assert.equal(await settings.evaluate(element => element.open), true);
-    assert.equal(await page.locator("#aiKeySummary").textContent(), "Key needed");
-    assert.equal(await page.getByLabel("API key for Groq (AI provider)", { exact: true }).inputValue(), "");
-    await page.locator("#panel-ai").screenshot({ path: path.join(prefix, "ai-screen-setup.png") });
+    await page.locator("#panel-ai").screenshot({ path: path.join(output, "ai-screen-settings.png") });
     await page.setViewportSize({ width: 320, height: 1000 });
     assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
-    await audit("Simplified AI panel, key setup at 320px");
+    await audit("Authorized AI at 320px");
     await page.locator("#aiSettings > summary").click();
-    await page.locator("#panel-ai").screenshot({ path: path.join(prefix, "ai-screen-mobile.png") });
+    await page.locator("#panel-ai").screenshot({ path: path.join(output, "ai-screen-mobile.png") });
     await page.setViewportSize({ width: 1280, height: 1000 });
+    await quickFilter.fill("");
     await page.evaluate(() => globalThis.fixtureSetRows(6505));
     await page.locator("#tab-builder").click();
     await page.getByRole("button", { name: "Run Report", exact: true }).click();
@@ -365,10 +393,26 @@ async function main() {
     await audit("Full CSV failure");
     await page.setViewportSize({ width: 320, height: 900 });
     assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
-    await page.locator(".results-card").screenshot({ path: path.join(prefix, "full-csv-mobile.png") });
+    await page.locator(".results-card").screenshot({ path: path.join(output, "full-csv-mobile.png") });
     console.log("PASS: full CSV is keyboard accessible, preserves focus, announces completion/failure and keeps readable error contrast and mobile layout");
     assert.deepEqual(errors, []);
-    console.log("PASS: question-first AI panel, disclosure keyboard access, remembered/missing key states, reviewed examples, textarea shortcuts and progress");
+    await page.evaluate(() => globalThis.fixtureFail = false);
+    await quickFilter.fill("");
+    await page.locator('#tab-ai').click();
+    await page.locator('#aiQuestionInput').fill('Count CARTA routes');
+    aiResponseGate = new Promise(resolve => {releaseAiResponse = resolve;});
+    const pendingAi = page.waitForRequest(origin + '/.netlify/functions/report');
+    await create.click(); await pendingAi;
+    await page.locator('#staffSignOutBtn').click();
+    assert.equal(await page.locator('#tab-ai').isVisible(), false);
+    assert.equal(await page.locator('#panel-ai').isVisible(), false);
+    assert.equal(await page.locator('#tab-presets').getAttribute('aria-selected'), 'true');
+    releaseAiResponse(); aiResponseGate = null;
+    await routes.click();
+    await page.locator('#resultsSummary').filter({hasText: /^50 rows on this page$/}).waitFor();
+    assert.equal(await page.locator('#resultsTitle').textContent(), 'Bus routes');
+    await audit('Signed out after canceling pending AI, with public report available');
+    console.log('PASS: signed-out, unauthorized, authorization-loading, authorized and sign-out states; no key controls; backend-only requests; public reports preserved');
     console.log("Manual screen-reader speech and browser zoom checks remain separate verification.");
   } finally {
     if (releaseAiResponse) releaseAiResponse();

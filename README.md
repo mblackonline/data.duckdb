@@ -18,9 +18,9 @@ Report Assistant. Queries run in your browser using DuckDB.
 
 A hosted version is planned for Netlify.
 
-AI reporting is planned for authorized Microsoft 365 users only, with the Groq
-key kept on the server. The protected backend is implemented locally; Microsoft
-sign-in and browser integration are pending. Non-AI reporting remains public.
+AI reporting uses Microsoft sign-in and explicit staff authorization, with the
+Groq key kept on the server. Sign-in and AI authorization are verified locally;
+live AI generation and deployment checks are pending. Non-AI reporting remains public.
 
 Download report (CSV) exports the full matching report, preserving SQL limits.
 Search this page affects only the displayed page. See Download help for export

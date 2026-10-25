@@ -23,10 +23,10 @@ function result(rows) {
   return { schema: { fields: Object.keys(rows[0] || {}).map(name => ({ name })) }, numRows: rows.length, get: index => rows[index], toArray: () => rows };
 }
 
-function harness({ actualGenerator = false, storage = { getItem() { return null; }, setItem() {}, removeItem() {} } } = {}) {
+function harness({ actualGenerator = false, authorized = true, storage = { getItem() { return null; }, setItem() {}, removeItem() {} } } = {}) {
   const queries = [], generations = [], apiCalls = [], downloads = [];
-  const context = { console, Blob, TextEncoder, setTimeout, clearTimeout, performance: { now: () => 0 } };
-  for (const name of ["quickSearchInput", "exportCsvBtn", "resultsMeta", "resultsScope", "resultsFreshness", "sqlQueryBox", "runCustomSqlBtn", "runBuilderBtn", "stopReportBtn", "reconnectBtn", "presetGrid", "dbStatusDot", "dbStatusText", "tableContainer", "errorBanner", "askAiBtn", "aiQuestionInput", "groqApiKeyInput", "groqKeyStatus", "aiStatusText", "groqModelSelect", "saveGroqKeyBtn", "forgetGroqKeyBtn", "aiSettings", "aiKeySummary", "rowsPerPage", "previousPageBtn", "nextPageBtn", "pageStatus"]) {
+  const context = { console, Blob, TextEncoder, AbortController, AbortSignal, DOMException, setTimeout, clearTimeout, performance: { now: () => 0 } };
+  for (const name of ["quickSearchInput", "exportCsvBtn", "resultsMeta", "resultsScope", "resultsFreshness", "sqlQueryBox", "runCustomSqlBtn", "runBuilderBtn", "stopReportBtn", "reconnectBtn", "presetGrid", "dbStatusDot", "dbStatusText", "tableContainer", "errorBanner", "askAiBtn", "aiQuestionInput", "aiStatusText", "groqModelSelect", "aiSettings", "rowsPerPage", "previousPageBtn", "nextPageBtn", "pageStatus", "staffSignInBtn", "staffSignOutBtn", "staffName", "staffAuthStatus", "legacyKeyStatus"]) {
     context[name] = { value: "", textContent: "", innerHTML: "", disabled: false, hidden: false, style: {}, focus() {}, classList: { add() {}, remove() {} }, listeners: new Map(), querySelectorAll: () => [], addEventListener(type, fn) { this.listeners.set(type, fn); } };
   }
   const connections = [];
@@ -71,13 +71,12 @@ function harness({ actualGenerator = false, storage = { getItem() { return null;
     normalizeReportSql: async (parsed, connection, sql) => ({ sql, ordered: true }),
     buildGroqSchemaPrompt: async () => "Table data.simple_bus_routes: name VARCHAR",
     extractSql: sql => sql,
-    callGroqChat(key, model) { const pending = deferred(); apiCalls.push({ model, ...pending }); return pending.promise; },
-    generateSqlWithGroq(...args) { const pending = deferred(); generations.push({ args, ...pending }); return pending.promise; },
+    mockStaffSession: { requestReport(body, signal) { const pending = deferred(); apiCalls.push({ model: body.model, body, signal, ...pending }); return pending.promise; } },
+    generateSqlWithBackend(...args) { const pending = deferred(); generations.push({ args, ...pending }); return pending.promise; },
     URL: { createObjectURL(blob) { downloads.push(blob); return "blob:mock"; }, revokeObjectURL() {} },
     document: { createElement: () => ({ click() {} }) }
   });
   if (typeof storage === "function") Object.defineProperty(context, "localStorage", { get: storage });
-  context.groqApiKeyInput.value = "mock-key";
   context.groqModelSelect.value = "openai/gpt-oss-120b";
   context.aiQuestionInput.value = "List CARTA routes";
   context.reconnectBtn.hidden = true;
@@ -92,9 +91,10 @@ function harness({ actualGenerator = false, storage = { getItem() { return null;
     section('    askAiBtn.addEventListener("click", async () => {', "    function showError("),
     section("    function showError(", "    initDuckDB();")
   ];
-  if (actualGenerator) blocks.push(section("    async function generateSqlWithGroq(", '    askAiBtn.addEventListener("click", async () => {'));
+  if (actualGenerator) blocks.push(section("    async function generateSqlWithBackend(", '    askAiBtn.addEventListener("click", async () => {'));
   vm.runInContext(blocks.join("\n"), context);
-  vm.runInContext("conn = mockConn; db = mockDb; duckdbWorker = mockWorker;", context);
+  vm.runInContext("conn = mockConn; db = mockDb; duckdbWorker = mockWorker; staffSession = mockStaffSession;", context);
+  vm.runInContext(`aiAuthorized = ${authorized};`, context);
   return {
     ui: context, queries, generations, apiCalls, downloads, connections,
     run: (sql, title = sql) => context.executeQuery(sql, title),
@@ -467,68 +467,40 @@ test("overlapping streams use isolated connections", async () => {
   assert.deepEqual(h.state().rows, [{ current: "new" }]);
 });
 
-test("actual AI requests send the disclosed schemas, samples, question and retry error without logging", async () => {
+test("backend requests send disclosed context and bind correction to the original preferred model", async () => {
   const h = harness({ actualGenerator: true });
   const requests = [], logs = [];
-  h.ui.console = Object.fromEntries(["log", "info", "warn", "error", "debug", "trace"].map(method => [method, (...args) => logs.push(args)]));
+  h.ui.console = Object.fromEntries(["log", "info", "warn", "error", "debug"].map(method => [method, (...args) => logs.push(args)]));
   vm.runInContext('availableViews = ["simple_bus_routes", "simple_bus_stops"];', h.ui);
-  h.ui.VIEW_KEYWORDS = {};
-  h.ui.matchBestView = () => "simple_bus_routes";
+  h.ui.VIEW_KEYWORDS = {}; h.ui.matchBestView = () => "simple_bus_routes";
   h.ui.getColumnsForView = async () => [{ name: "name", type: "VARCHAR" }];
   h.ui.mockConn.query = async () => result([{ name: "Public route sample" }]);
-  h.ui.fetch = async (url, options) => {
-    requests.push({ url, ...options, body: JSON.parse(options.body) });
-    return { ok: true, json: async () => ({ choices: [{ message: { content: "SELECT * FROM data.simple_bus_routes" } }] }) };
+  h.ui.mockStaffSession.requestReport = async body => {
+    requests.push(body); return { sql: "SELECT * FROM data.simple_bus_routes", model: "openai/gpt-oss-20b", reportId: "test-report" };
   };
-  vm.runInContext([
-    section("    const sampleCache", "    function extractSql("),
-    section("    async function callGroqChat(", "    async function generateSqlWithGroq(")
-  ].join("\n"), h.ui);
-
-  const question = "List CARTA routes";
-  const retryError = 'Binder Error: missing column in SELECT "private example"';
-  await h.ui.generateSqlWithGroq("mock-secret-key", question);
-  await h.ui.generateSqlWithGroq("mock-secret-key", question, retryError);
+  vm.runInContext(section("    const sampleCache", "    function extractSql("), h.ui);
+  const generated = await h.ui.generateSqlWithBackend("List CARTA routes");
+  h.ui.groqModelSelect.value = "openai/gpt-oss-20b";
+  await h.ui.generateSqlWithBackend("List CARTA routes", "Unknown column", null, generated.generation);
   assert.equal(requests.length, 2);
-  for (const request of requests) {
-    assert.equal(request.url, "https://api.groq.com/openai/v1/chat/completions");
-    assert.equal(request.method, "POST");
-    assert.equal(request.headers.Authorization, "Bearer mock-secret-key");
-    assert(!JSON.stringify(request.body).includes("mock-secret-key"));
-    const [system, user] = request.body.messages;
-    assert.equal(system.role, "system");
-    assert.match(system.content, /Table data.simple_bus_routes: "name" \(VARCHAR\)/);
-    assert.match(system.content, /Sample row.*Public route sample/);
-    assert.match(system.content, /Other available tables: data.simple_bus_stops/);
-    assert.equal(user.role, "user");
-    assert(user.content.includes(question));
-  }
-  assert.equal(requests[0].body.messages[1].content, question);
-  assert(!JSON.stringify(requests[0].body).includes(retryError));
-  assert(requests[1].body.messages[1].content.includes(retryError));
+  assert.match(requests[0].schema, /Table data.simple_bus_routes: "name" \(VARCHAR\)/);
+  assert.match(requests[0].schema, /Public route sample/);
+  assert.match(requests[0].schema, /Other available tables: data.simple_bus_stops/);
+  assert.equal(requests[0].question, "List CARTA routes"); assert.equal(requests[0].error, undefined);
+  assert.equal(requests[1].error, "Unknown column"); assert.equal(requests[1].reportId, "test-report");
+  assert.equal(requests[1].model, "openai/gpt-oss-120b");
+  assert.deepEqual(Object.keys(requests[0]).sort(), ["model", "question", "schema"]);
   assert.deepEqual(logs, []);
 });
 
 for (const status of [400, 404, 429, 401]) {
-  test(`actual Groq HTTP ${status} handling stays within the approved fallback models without logging`, async () => {
+  test(`backend HTTP ${status} never causes a browser model-fallback loop`, async () => {
     const h = harness({ actualGenerator: true });
-    const logs = [];
-    h.ui.console = Object.fromEntries(["log", "info", "warn", "error", "debug", "trace"].map(method => [method, (...args) => logs.push(args)]));
-    const pending = h.ui.generateSqlWithGroq("mock-secret-key", "List CARTA routes");
-    // Attach rejection handling before resolving the asynchronous HTTP failure.
-    const rejected = status === 401 ? assert.rejects(pending, /HTTP 401/) : null;
+    const pending = h.ui.generateSqlWithBackend("List CARTA routes");
+    const rejected = assert.rejects(pending, /backend failure/);
     await new Promise(setImmediate);
-    h.apiCalls[0].resolve({ ok: false, status, text: async () => "mock private error body" });
-    await new Promise(setImmediate);
-    if (status === 401) {
-      await rejected;
-      assert.deepEqual(h.apiCalls.map(call => call.model), ["openai/gpt-oss-120b"]);
-    } else {
-      assert.deepEqual(h.apiCalls.map(call => call.model), ["openai/gpt-oss-120b", "openai/gpt-oss-20b"]);
-      h.apiCalls[1].resolve({ ok: true, json: async () => ({ choices: [{ message: { content: "SELECT * FROM data.simple_bus_routes" } }] }) });
-      assert.equal((await pending).usedModel, "openai/gpt-oss-20b");
-    }
-    assert.deepEqual(logs, []);
+    h.apiCalls[0].reject(Error("backend failure")); await rejected;
+    assert.equal(h.apiCalls.length, 1);
   });
 }
 

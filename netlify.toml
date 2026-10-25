@@ -5,6 +5,9 @@
 [functions]
   directory = "netlify/functions"
 
+[build.processing.html]
+  pretty_urls = false
+
 [dev]
   framework = "#static"
   publish = "dist"

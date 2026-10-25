@@ -3,12 +3,21 @@ const path = require("node:path");
 
 const root = path.join(__dirname, "..");
 const output = path.join(root, "dist");
-const files = ["index.html", "assets/styles.css", "assets/app.js"];
+const files = [
+  "index.html", "auth-redirect.html", "assets/styles.css", "assets/app.js",
+  "assets/staff-auth.mjs", "assets/staff-config.json", "assets/auth-redirect.js"
+];
+const vendorFiles = {
+  "assets/msal-browser.min.js": "node_modules/@azure/msal-browser/lib/msal-browser.min.js",
+  "assets/msal-redirect-bridge.min.js": "node_modules/@azure/msal-browser/lib/redirect-bridge/msal-redirect-bridge.min.js",
+  "assets/msal-license.txt": "node_modules/@azure/msal-browser/LICENSE"
+};
+const publishFiles = [...files, ...Object.keys(vendorFiles)];
 
 // Refuse unexpected output instead of publishing or deleting stale files.
 for (const [folder, allowed] of [
-  [output, ["index.html", "assets"]],
-  [path.join(output, "assets"), ["styles.css", "app.js"]]
+  [output, ["index.html", "auth-redirect.html", "assets"]],
+  [path.join(output, "assets"), publishFiles.filter(file => file.startsWith("assets/")).map(file => path.basename(file))]
 ]) {
   if (!fs.existsSync(folder)) continue;
   if (!fs.lstatSync(folder).isDirectory()) {
@@ -26,4 +35,7 @@ fs.mkdirSync(path.join(output, "assets"), { recursive: true });
 for (const file of files) {
   fs.copyFileSync(path.join(root, file), path.join(output, file));
 }
-console.log(`Prepared ${files.length} website files in dist. No deployment performed.`);
+for (const [file, source] of Object.entries(vendorFiles)) {
+  fs.copyFileSync(path.join(root, source), path.join(output, file));
+}
+console.log(`Prepared ${publishFiles.length} website files in dist. No deployment performed.`);

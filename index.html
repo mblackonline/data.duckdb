@@ -12,9 +12,21 @@
       <h1>CARTA Open Data Explorer</h1>
       <p>Point-and-click reports, custom filters, and plain-English search powered by DuckDB in your browser</p>
     </div>
+    <div class="header-controls">
+      <div class="staff-sign-in">
+        <div class="staff-account-actions">
+          <span id="staffName" hidden></span>
+          <button id="staffSignInBtn" type="button" class="btn staff-auth-button" disabled>Sign in with Microsoft</button>
+          <button id="staffSignOutBtn" type="button" class="btn staff-auth-button" hidden>Sign out</button>
+        </div>
+        <p>AI reporting is available to authorized staff.</p>
+        <p id="staffAuthStatus" role="status" aria-live="polite" aria-atomic="true"></p>
+        <p id="legacyKeyStatus" role="status" aria-live="polite"></p>
+      </div>
     <div class="status-badge">
       <span id="dbStatusDot" class="status-dot"></span>
       <span id="dbStatusText" role="status" aria-live="polite" aria-atomic="true">Connecting to CARTA DuckDB...</span>
+    </div>
     </div>
   </header>
 
@@ -22,7 +34,7 @@
     <div class="tabs" role="tablist" aria-label="Report tools">
       <button id="tab-presets" class="tab-btn active" role="tab" aria-controls="panel-presets" aria-selected="true" tabindex="0" data-tab="panel-presets">1. One-Click Reports</button>
       <button id="tab-builder" class="tab-btn" role="tab" aria-controls="panel-builder" aria-selected="false" tabindex="-1" data-tab="panel-builder">2. Visual Filter Builder</button>
-      <button id="tab-ai" class="tab-btn" role="tab" aria-controls="panel-ai" aria-selected="false" tabindex="-1" data-tab="panel-ai">3. AI Report Assistant</button>
+      <button id="tab-ai" class="tab-btn" role="tab" aria-controls="panel-ai" aria-selected="false" tabindex="-1" data-tab="panel-ai" hidden>3. AI Report Assistant</button>
     </div>
 
     <!-- TAB 1: ONE-CLICK PRESETS -->
@@ -90,7 +102,7 @@
         <p class="panel-subtitle">Describe the report you need.</p>
 
         <label for="aiQuestionInput" class="field-label">Your question</label>
-        <textarea id="aiQuestionInput" class="ai-question" rows="3"
+        <textarea id="aiQuestionInput" class="ai-question" rows="3" maxlength="8000"
           aria-describedby="aiQuestionHelp aiPrivacyWarning"
           placeholder="For example, show CARTA ridership by mode for 2024."></textarea>
         <p id="aiQuestionHelp" class="ai-input-hint">Enter to create a report. Shift+Enter adds a new line.</p>
@@ -110,20 +122,10 @@
           <button class="chip" data-prompt="Show the top 20 Bike Chattanooga stations ordered by capacity.">Bike station capacity</button>
         </div>
 
-        <details id="aiSettings" class="ai-details" open>
-          <summary>AI settings <span id="aiKeySummary" class="ai-key-summary">Key needed</span></summary>
+        <details id="aiSettings" class="ai-details">
+          <summary>AI settings</summary>
           <div class="ai-settings-content ai-detail-copy">
             <div class="ai-settings-grid">
-              <div class="form-group">
-                <label for="groqApiKeyInput">API key for Groq (AI provider)</label>
-                <input type="password" id="groqApiKeyInput" placeholder="gsk_..." autocomplete="off" aria-describedby="groqKeyStorageHelp" />
-                <a href="https://console.groq.com/keys" target="_blank" rel="noopener">Get an API key</a>
-                <div class="ai-key-actions">
-                  <button id="saveGroqKeyBtn" type="button" class="btn btn-secondary">Remember on this device</button>
-                  <button id="forgetGroqKeyBtn" type="button" class="btn btn-secondary">Forget key</button>
-                </div>
-                <p id="groqKeyStatus" role="status" aria-atomic="true"></p>
-              </div>
               <div class="form-group">
                 <label for="groqModelSelect">AI model</label>
                 <select id="groqModelSelect" aria-describedby="groqModelHelp">
@@ -133,11 +135,7 @@
                 <p id="groqModelHelp">The other approved model may be tried after a rate limit or certain API errors.</p>
               </div>
             </div>
-            <p id="groqKeyStorageHelp">
-              Default: this tab only, cleared on reload or close. Choose Remember on this device to save your key
-              across visits. Avoid remembering keys on shared computers. Forget key removes this app's saved copy;
-              it does not revoke the key at Groq or withdraw requests already sent.
-            </p>
+            <p>Up to 200 submitted AI questions per person per UTC day. Automatic model fallback and one SQL correction are included.</p>
           </div>
         </details>
 
@@ -146,11 +144,12 @@
           <div class="ai-detail-copy">
             <p>Your question, selected table schemas (table and column names and types), sample values from public
               datasets, and other available table names are sent to Groq (AI provider). If SQL fails, a retry also sends the DuckDB
-              error, which may include SQL or data values. Generated SQL runs in your browser using DuckDB.</p>
-            <p>Your API key is sent directly to Groq for authentication. This application does not record keys or
-              questions in application logs. Groq handles requests under its
+              error, which may include SQL or data values. These requests pass through this site's protected backend.
+              Generated SQL runs in your browser using DuckDB.</p>
+            <p>The Groq key stays on the server. Microsoft access tokens are sent only to this site's backend.
+              This application does not record keys or questions in application logs. Groq handles requests under its
               <a href="https://console.groq.com/docs/your-data" target="_blank" rel="noopener">data policies</a>
-              and your Groq organization's retention settings.</p>
+              and the POC organization's retention settings.</p>
           </div>
         </details>
       </div>
@@ -236,6 +235,7 @@
     </section>
   </main>
 
+  <script defer src="./assets/msal-browser.min.js"></script>
   <script type="module" src="./assets/app.js"></script>
 </body>
 </html>

@@ -177,6 +177,9 @@
     let currentRequestTitle = "Report";
     const activeQueries = new Set();
     let activeCsvExport = null;
+    let staffSession = null;
+    let aiAuthorized = false;
+    let activeAiController = null;
 
     // DOM elements
     const dbStatusDot = document.getElementById("dbStatusDot");
@@ -211,110 +214,88 @@
     const reportPagination = document.getElementById("reportPagination");
 
     // Plain-English Search DOM elements
-    const groqApiKeyInput = document.getElementById("groqApiKeyInput");
     const groqModelSelect = document.getElementById("groqModelSelect");
-    const saveGroqKeyBtn = document.getElementById("saveGroqKeyBtn");
-    const forgetGroqKeyBtn = document.getElementById("forgetGroqKeyBtn");
     const aiSettings = document.getElementById("aiSettings");
-    const aiKeySummary = document.getElementById("aiKeySummary");
-    const groqKeyStatus = document.getElementById("groqKeyStatus");
     const aiStatusText = document.getElementById("aiStatusText");
     const aiQuestionInput = document.getElementById("aiQuestionInput");
     const askAiBtn = document.getElementById("askAiBtn");
 
-    // Only explicitly remembered keys are persisted. Storage access can throw even on reads.
+    const staffSignInBtn = document.getElementById("staffSignInBtn");
+    const staffSignOutBtn = document.getElementById("staffSignOutBtn");
+    const staffName = document.getElementById("staffName");
+    const staffAuthStatus = document.getElementById("staffAuthStatus");
+    const legacyKeyStatus = document.getElementById("legacyKeyStatus");
+
+    // Remove only this application's old saved key, without reading or restoring it.
     const GROQ_STORAGE_KEY = "carta_groq_api_key";
-    let groqStorageWarning = false;
+    try { localStorage.removeItem(GROQ_STORAGE_KEY); }
+    catch { legacyKeyStatus.textContent = "A previously saved personal key could not be cleared. Clear this site's browser data to remove it. Public reporting remains available."; }
 
-    function updateAiKeySummary() {
-      aiKeySummary.textContent = groqStorageWarning
-        ? "Review key storage"
-        : groqApiKeyInput.value.trim() ? "Key entered" : "Key needed";
-      if (groqStorageWarning) aiSettings.open = true;
-    }
-
-    function keepGroqKeyInTab(message) {
-      try {
-        localStorage.removeItem(GROQ_STORAGE_KEY);
-        groqStorageWarning = false;
-        groqKeyStatus.textContent = message;
-      } catch {
-        groqStorageWarning = true;
-        groqKeyStatus.textContent = "Browser storage could not be cleared. A saved key may remain; clear this site's browser data. You can still use a key in this tab.";
-      }
-      updateAiKeySummary();
-    }
-
-    function loadRememberedGroqKey() {
-      groqKeyStatus.textContent = "Enter a key for this tab only, cleared on reload or close.";
-      try {
-        const saved = localStorage.getItem(GROQ_STORAGE_KEY);
-        if (!saved) return;
-        let record;
-        try { record = JSON.parse(saved); } catch { /* Older versions stored the raw key without consent metadata. */ }
-        if (record?.version === 1 && record.remember === true && typeof record.key === "string" && record.key.trim()) {
-          groqApiKeyInput.value = record.key.trim();
-          groqKeyStatus.textContent = "Remembered key loaded from this browser. Use Forget key to remove it.";
-        } else {
-          // Preserve legacy raw keys for this tab, but require fresh consent before persisting them.
-          if (!saved.trim().startsWith("{") && !saved.trim().startsWith("[")) groqApiKeyInput.value = saved.trim();
-          keepGroqKeyInTab(groqApiKeyInput.value
-            ? "Previously saved key is now this tab only. Choose Remember on this device to save it again."
-            : "Invalid saved key removed. Enter a key for this tab only.");
+    function cancelStaffAi(message) {
+      const canceledId = activeAiRequestId ?? (currentRequestTitle.startsWith("AI Search:") ? reportRequestId : null);
+      activeAiController?.abort();
+      activeAiController = null;
+      if (canceledId !== null && canceledId === reportRequestId) {
+        beginReportRequest("AI request canceled", message);
+        resultsMeta.textContent = message;
+        resultsSummary.textContent = "AI request canceled.";
+        resultsFreshness.textContent = "No report loaded.";
+        for (const operation of activeQueries) {
+          if (operation.requestId !== canceledId) continue;
+          clearTimeout(operation.timer);
+          operation.reject(reportLimitError(message));
+          operation.cancel?.().catch(() => {});
         }
-      } catch {
-        groqStorageWarning = true;
-        groqKeyStatus.textContent = "Browser storage is unavailable. Enter a key for this tab. A previously saved key may remain; clear this site's browser data to remove it.";
       }
+      activeAiRequestId = null;
+      askAiBtn.disabled = !conn || !aiAuthorized;
+      if (!activeQueries.size) stopReportBtn.disabled = true;
     }
 
-    loadRememberedGroqKey();
-    updateAiKeySummary();
-    aiSettings.open = !groqApiKeyInput.value.trim() || groqStorageWarning;
-
-    groqApiKeyInput.addEventListener("input", () => {
-      keepGroqKeyInTab(groqApiKeyInput.value.trim()
-        ? "Key is available in this tab only, cleared on reload or close."
-        : "Enter a key for this tab only, cleared on reload or close.");
-    });
-
-    saveGroqKeyBtn.addEventListener("click", () => {
-      const key = groqApiKeyInput.value.trim();
-      if (!key) {
-        groqKeyStatus.textContent = "Enter a key before choosing Remember on this device.";
-        return;
+    function applyStaffState(state) {
+      aiAuthorized = state.authorized === true;
+      if (!aiAuthorized) cancelStaffAi("AI request canceled because access changed.");
+      const aiTab = document.getElementById("tab-ai");
+      if (!aiAuthorized && aiTab.getAttribute("aria-selected") === "true") {
+        activateReportTab(reportTabs[0]);
+        if (document.getElementById("panel-ai").contains(document.activeElement)) reportTabs[0].focus();
       }
+      aiTab.hidden = !aiAuthorized;
+      if (!aiAuthorized) document.getElementById("panel-ai").hidden = true;
+      if (!state.signedIn) {
+        aiQuestionInput.value = "";
+        aiStatusText.textContent = "";
+      }
+      staffName.hidden = !state.signedIn;
+      staffName.textContent = state.signedIn ? state.name : "";
+      staffSignInBtn.hidden = state.signedIn;
+      staffSignInBtn.disabled = state.busy;
+      staffSignOutBtn.hidden = !state.signedIn;
+      staffSignOutBtn.disabled = state.busy;
+      staffAuthStatus.textContent = state.message;
+      askAiBtn.disabled = !conn || !aiAuthorized || activeAiRequestId !== null;
+    }
+
+    async function initializeStaffSignIn() {
       try {
-        localStorage.setItem(GROQ_STORAGE_KEY, JSON.stringify({ version: 1, remember: true, key }));
-        groqStorageWarning = false;
-        groqKeyStatus.textContent = "Key remembered on this device across visits. Use Forget key to remove it.";
-        updateAiKeySummary();
+        const response = await fetch("./assets/staff-config.json", { cache: "no-store" });
+        if (!response.ok) throw new Error("Missing sign-in configuration.");
+        const config = await response.json();
+        const { createStaffSession } = await import("./staff-auth.mjs");
+        staffSession = await createStaffSession({ config, onState: applyStaffState });
       } catch {
-        keepGroqKeyInTab("Could not remember the key. It is available in this tab only, cleared on reload or close.");
+        staffSignInBtn.disabled = true;
+        staffAuthStatus.textContent = "Microsoft sign-in is temporarily unavailable. Public reporting remains available.";
       }
-    });
-
-    forgetGroqKeyBtn.addEventListener("click", () => {
-      groqApiKeyInput.value = "";
-      aiSettings.open = true;
-      keepGroqKeyInTab("Key forgotten in this tab and removed from this browser's saved storage.");
-      if (activeAiRequestId !== null) {
-        if (activeAiRequestId === reportRequestId) {
-          beginReportRequest("AI request canceled", "Key forgotten. Choose a public report or enter a new key.");
-          resultsMeta.textContent = "AI request canceled after forgetting the key.";
-          resultsSummary.textContent = "AI request canceled.";
-          resultsFreshness.textContent = "No report loaded.";
-        }
-        activeAiRequestId = null;
-        askAiBtn.disabled = !conn;
-        if (!activeQueries.size) stopReportBtn.disabled = true;
-      }
-    });
+    }
+    staffSignInBtn.addEventListener("click", () => staffSession?.signIn());
+    staffSignOutBtn.addEventListener("click", () => staffSession?.signOut());
 
     // Setup Tabs
     const reportTabs = Array.from(document.querySelectorAll('[role="tab"]'));
 
     function activateReportTab(tab) {
+      if (tab.hidden) return;
       for (const candidate of reportTabs) {
         const selected = candidate === tab;
         candidate.setAttribute("aria-selected", String(selected));
@@ -326,19 +307,21 @@
       }
     }
 
-    reportTabs.forEach((btn, index) => {
+    reportTabs.forEach((btn) => {
       btn.addEventListener("click", () => activateReportTab(btn));
       btn.addEventListener("focus", () => activateReportTab(btn));
       btn.addEventListener("keydown", (event) => {
         if (event.altKey || event.ctrlKey || event.metaKey) return;
+        const visibleTabs = reportTabs.filter(tab => !tab.hidden);
+        const index = visibleTabs.indexOf(btn);
         let next;
-        if (event.key === "ArrowRight") next = (index + 1) % reportTabs.length;
-        else if (event.key === "ArrowLeft") next = (index + reportTabs.length - 1) % reportTabs.length;
+        if (event.key === "ArrowRight") next = (index + 1) % visibleTabs.length;
+        else if (event.key === "ArrowLeft") next = (index + visibleTabs.length - 1) % visibleTabs.length;
         else if (event.key === "Home") next = 0;
-        else if (event.key === "End") next = reportTabs.length - 1;
+        else if (event.key === "End") next = visibleTabs.length - 1;
         else return;
         event.preventDefault();
-        reportTabs[next].focus();
+        visibleTabs[next].focus();
       });
     });
 
@@ -411,7 +394,7 @@
         dbStatusText.textContent = `Connected (${availableViews.length} CARTA datasets ready)`;
         runBuilderBtn.disabled = false;
         runCustomSqlBtn.disabled = false;
-        askAiBtn.disabled = false;
+        askAiBtn.disabled = !aiAuthorized;
         rowsPerPage.disabled = false;
       } catch (err) {
         dbStatusDot.classList.add("error");
@@ -538,6 +521,8 @@
     function stopReports(message = "Report stopped. Reconnect to run another report.") {
       cancelFullCsvExport("Export stopped. Reconnect before trying again.", true);
       ++reportRequestId;
+      activeAiController?.abort();
+      activeAiController = null;
       activeAiRequestId = null;
       const worker = duckdbWorker;
       const bindings = db;
@@ -612,7 +597,7 @@
       const bindings = db;
       let reject;
       const stopped = new Promise((resolve, no) => { reject = no; });
-      const operation = { reject, timer: null };
+      const operation = { reject, timer: null, requestId, cancel: null };
       activeQueries.add(operation);
       operation.timer = setTimeout(() => stopReports("Report stopped after 30 seconds. Reconnect, then narrow the query."), REPORT_TIMEOUT_MS);
       const work = (async () => {
@@ -621,6 +606,7 @@
         let complete = false;
         try {
           queryConnection = await bindings.connect();
+          operation.cancel = () => queryConnection.cancelSent();
           if (requestId !== reportRequestId) return null;
           const parsed = await validateCartaSql(sql, queryConnection);
           if (requestId !== reportRequestId) return null;
@@ -674,6 +660,10 @@
     function beginReportRequest(title, message = "Loading data from CARTA S3...") {
       if (activeCsvExport) cancelFullCsvExport("Export canceled because another report or page was requested.");
       else setCsvExportStatus("");
+      activeAiController?.abort();
+      activeAiController = null;
+      activeAiRequestId = null;
+      askAiBtn.disabled = !conn || !aiAuthorized;
       const requestId = ++reportRequestId;
       currentRequestTitle = title;
       stopReportBtn.disabled = false;
@@ -1462,96 +1452,38 @@ FROM parsed ORDER BY "trip_id";`;
       if (!inspectQuery(parsed.statements[0].node)) reject("The query must read a CARTA dataset; comments, literals, and unused CTEs do not count as data sources.");
     }
 
-    async function callGroqChat(apiKey, model, systemPrompt, userPrompt) {
-      const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${apiKey}`
-        },
-        body: JSON.stringify({
-          model,
-          temperature: 0,
-          max_tokens: 1024,
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: userPrompt }
-          ]
-        })
-      });
-      return res;
-    }
-
-    async function generateSqlWithGroq(apiKey, question, retryError = "", requestId = null) {
-      const isCurrent = () => requestId === null || requestId === reportRequestId;
-      const schemaText = await buildGroqSchemaPrompt(question);
+    async function generateSqlWithBackend(question, retryError = "", requestId = null, generation = null, signal = null) {
+      const isCurrent = () => (requestId === null || requestId === reportRequestId) && aiAuthorized && !signal?.aborted;
       if (!isCurrent()) return null;
-      const systemPrompt = `You are a DuckDB SQL expert for Chattanooga Area Regional Transportation Authority (CARTA).
-Write a single valid DuckDB SQL query to answer the user's question. Output ONLY the SQL query, with no explanation or markdown.
-Rules:
-1. Always prefix table names with data. (for example: data.simple_bus_routes).
-2. Always wrap column names in double quotes (for example: "Legacy NTD ID", "UZA Name", "UPT").
-3. In data.ntd_monthly_ridership_v1 (national NTD dataset):
-   - CARTA's "NTD ID" is '${CARTA_NTD_ID}'. For CARTA questions, use WHERE "NTD ID" = '${CARTA_NTD_ID}'. Its separate "Legacy NTD ID" is '4001'; do not confuse these columns.
-   - Default to CARTA only. Omit or change this agency filter only when the user explicitly requests another agency or a regional/national comparison. Do not identify CARTA by "Agency" text or "UZA Name", which describe names or geography rather than the exact agency identifier.
-   - The "Mode" column uses 2-letter NTD codes: 'MB' (Motor Bus), 'DR' (Demand Response / Paratransit), 'IP' (Inclined Plane). The "3 Mode" column uses 'Bus' or 'Demand Response'.
-4. Do not add LIMIT unless the user explicitly requests a fixed number of records or a top/bottom list. The application paginates results separately; it does not need a preview LIMIT. Use a deterministic ORDER BY where practical.
-5. STRICT GUARDRAIL: Every query MUST include a FROM data.<table_name> clause referencing one of the tables in Schema. Never output a SELECT with only literal strings/numbers to answer general knowledge, coding, or non-CARTA questions. If the user's request is not about querying the CARTA tables listed in Schema, output the single word: UNSUPPORTED_QUERY
-6. Match the requested task. A request to show/list/browse a dataset must return its published reporting fields, excluding geometry, without inventing delay calculations, metrics, aggregations or extra filters. Calculate a metric only when explicitly requested.
-7. Follow the per-table time semantics below. Never prepend a date to a full ISO timestamp. Never subtract TIMESTAMP from TIMESTAMPTZ or compare unrelated service days. For full dated timestamps with offsets, use TRY_CAST(column AS TIMESTAMPTZ) on both operands. In this pinned Wasm engine, compute epoch values in a MATERIALIZED CTE first, then calculate (end_seconds - start_seconds) / 60.0 in the outer query; do not inline both epoch/TRY_CAST expressions into the subtraction. Do not multiply an INTERVAL by 1440 or assume that executing a query proves its date semantics. For malformed or missing inputs, preserve NULL rather than fabricating zero delay.
-8. GTFS service-day clocks can exceed 24:00:00. They are durations from the service-day origin, not standalone timestamps. To compare clock durations on a confirmed common service day, convert hours/minutes/seconds numerically; calendar comparisons also require a confirmed service date and agency timezone. If required time context is unavailable, output only MISSING_TIME_CONTEXT instead of guessing a date or returning an invented calculation.
-
-Schema:
-${schemaText}`;
-
-      const userPrompt = retryError
-        ? `Question: ${question}\nPrevious SQL failed in DuckDB with error: ${retryError}\nFix the DuckDB SQL query using only the exact column names listed in Schema. Preserve the original requested task and follow the time semantics; do not fix type errors by inventing dates or discarding timezone offsets. If required time context is unavailable, output MISSING_TIME_CONTEXT.`
-        : question;
-
-      const selectedModel = GROQ_MODELS.includes(groqModelSelect.value)
-        ? groqModelSelect.value
-        : GROQ_MODELS[0];
-      const uniqueCandidates = [...new Set([selectedModel, ...GROQ_MODELS])];
-
-      let lastRes = null;
-      let usedModel = uniqueCandidates[0];
-
-      for (const candidate of uniqueCandidates) {
-        if (!isCurrent()) return null;
-        usedModel = candidate;
-        aiStatusText.textContent = "Preparing report...";
-        const res = await callGroqChat(apiKey, usedModel, systemPrompt, userPrompt);
-        if (!isCurrent()) return null;
-        lastRes = res;
-        if (res.ok) {
-          if (usedModel !== selectedModel) {
-            groqModelSelect.value = usedModel;
-          }
-          const data = await res.json();
-          if (!isCurrent()) return null;
-          const sql = extractSql(data.choices?.[0]?.message?.content || "");
-          return { sql, usedModel };
-        }
-        if (res.status !== 404 && res.status !== 429 && res.status !== 400) {
-          break;
-        }
+      const context = generation || {
+        question, schema: await buildGroqSchemaPrompt(question),
+        model: GROQ_MODELS.includes(groqModelSelect.value) ? groqModelSelect.value : GROQ_MODELS[0]
+      };
+      if (!isCurrent()) return null;
+      if (retryError && !context.reportId) throw new Error("This report cannot be corrected. Submit a new question.");
+      const data = await staffSession.requestReport({
+        question: context.question, schema: context.schema, model: context.model,
+        ...(retryError ? { reportId: context.reportId, error: retryError.slice(0, 16000) } : {})
+      }, signal);
+      if (!isCurrent()) return null;
+      if (typeof data.sql !== "string" || typeof data.reportId !== "string" || !GROQ_MODELS.includes(data.model)) {
+        throw new Error("AI reporting returned an invalid response.");
       }
-
-      const errBody = lastRes ? await lastRes.text() : "Unknown error";
-      throw new Error(`AI provider error (HTTP ${lastRes?.status}): ${errBody}`);
+      context.reportId = data.reportId;
+      return { sql: extractSql(data.sql), usedModel: data.model, generation: context };
     }
 
     askAiBtn.addEventListener("click", async () => {
+      if (!aiAuthorized || !staffSession || !conn) return;
       const question = aiQuestionInput.value.trim();
       if (!question) return;
-
-      const apiKey = groqApiKeyInput.value.trim();
-
-      askAiBtn.disabled = true;
       const title = `AI Search: "${question}"`;
       const requestId = beginReportRequest(title, "Preparing report...");
       aiStatusText.textContent = "Preparing report...";
       activeAiRequestId = requestId;
+      const controller = new AbortController();
+      activeAiController = controller;
+      askAiBtn.disabled = true;
       try {
         if (isOffTopicQuestion(question)) {
           aiStatusText.textContent = "Blocked off-topic request (0 API tokens used).";
@@ -1568,14 +1500,7 @@ ${schemaText}`;
           return;
         }
 
-        if (!apiKey) {
-          aiSettings.open = true;
-          groqApiKeyInput.focus();
-          throw new Error("Enter an API key in AI settings to create a report.");
-        }
-        aiSettings.open = groqStorageWarning;
-
-        const generated = await generateSqlWithGroq(apiKey, question, "", requestId);
+        const generated = await generateSqlWithBackend(question, "", requestId, null, controller.signal);
         if (requestId !== reportRequestId) return;
         let { sql, usedModel } = generated;
         sqlQueryBox.value = sql;
@@ -1588,7 +1513,7 @@ ${schemaText}`;
           if (dbErr.code === "REPORT_LIMIT" || /out of memory|memory limit/i.test(dbErr.message || "")) throw dbErr;
           // 1-step self-correction with DuckDB error feedback
           aiStatusText.textContent = "Adjusting report...";
-          const retry = await generateSqlWithGroq(apiKey, question, dbErr.message || String(dbErr), requestId);
+          const retry = await generateSqlWithBackend(question, dbErr.message || String(dbErr), requestId, generated.generation, controller.signal);
           if (requestId !== reportRequestId) return;
           sql = retry.sql;
           usedModel = retry.usedModel;
@@ -1604,7 +1529,8 @@ ${schemaText}`;
       } finally {
         if (activeAiRequestId === requestId) {
           activeAiRequestId = null;
-          askAiBtn.disabled = false;
+          if (activeAiController === controller) activeAiController = null;
+          askAiBtn.disabled = !conn || !aiAuthorized;
           if (!activeQueries.size) stopReportBtn.disabled = true;
           if (requestId === reportRequestId && !activeQueries.size) rowsPerPage.disabled = !conn;
         }
@@ -1628,4 +1554,5 @@ ${schemaText}`;
     }
 
     initDuckDB();
+    initializeStaffSignIn();
   

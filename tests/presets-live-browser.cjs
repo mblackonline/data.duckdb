@@ -14,7 +14,10 @@ const root = path.join(__dirname, "..");
 const files = new Map([
   ["/", ["index.html", "text/html"]],
   ["/assets/styles.css", ["assets/styles.css", "text/css"]],
-  ["/assets/app.js", ["assets/app.js", "text/javascript"]]
+  ["/assets/app.js", ["assets/app.js", "text/javascript"]],
+  ["/assets/staff-auth.mjs", ["assets/staff-auth.mjs", "text/javascript"]],
+  ["/assets/staff-config.json", ["assets/staff-config.json", "application/json"]],
+  ["/assets/msal-browser.min.js", ["node_modules/@azure/msal-browser/lib/msal-browser.min.js", "text/javascript"]]
 ]);
 
 async function main() {
@@ -87,16 +90,9 @@ async function main() {
       }
       console.log(`PASS: ${preset.title}: ${snapshot.rows.length}/${reference.count} rows, ${snapshot.columns.length} columns, no truncation or report error`);
     }
-    await page.locator("#tab-ai").click();
-    await page.locator("#aiQuestionInput").fill("Show CARTA Trip Updates & Delays (GTFS-RT)");
-    await page.locator("#askAiBtn").click();
-    await page.getByText("Report ready (standard report; no AI request).", { exact: true }).waitFor();
-    const standard = await page.evaluate(() => presetCheck.snapshot);
-    assert.equal(standard.rows.length, Math.min(1000, tripUpdateCount));
-    assert.equal(standard.report.truncated, false);
-    assert.equal(await page.locator("#groqApiKeyInput").inputValue(), "");
-    assert(!standard.columns.includes("delay_minutes"));
-    console.log("PASS: The exact AI browsing request loads live trip updates using the standard query without an API key");
+    assert.equal(await page.locator('#tab-ai').isVisible(), false);
+    assert.equal(await page.locator('#groqApiKeyInput').count(), 0);
+    console.log('PASS: Public reports require no sign-in; AI stays hidden while signed out');
     assert.deepEqual(errors, [], "No unhandled browser errors");
     console.log("PASS: All eight actual one-click presets load through the pinned browser engine and public catalog; route values and stop paging verified");
   } finally {

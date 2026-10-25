@@ -1,0 +1,9 @@
+{
+  "tenantId": "2866b78f-a9f7-470f-a401-6d2030f2f932",
+  "webClientId": "88be5787-058e-43e7-a63e-7c4e9ce92ef3",
+  "apiScope": "api://8e597734-c74b-477d-bdfc-339f5da79469/Reports.Generate",
+  "redirectUris": [
+    "http://localhost:8000/auth-redirect.html",
+    "https://carta-open-data-explorer-poc.netlify.app/auth-redirect.html"
+  ]
+}

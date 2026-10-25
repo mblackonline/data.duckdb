@@ -41,7 +41,6 @@ test("unqualified standard report requests use exact tested queries without swal
 
 test("the screenshot browsing request succeeds without an API key, AI calculation or request", async () => {
   const h = setup();
-  h.ui.groqApiKeyInput.value = "";
   h.ui.aiQuestionInput.value = "Show CARTA Trip Updates & Delays (GTFS-RT)";
   const pending = h.ask();
   await new Promise(setImmediate);
@@ -98,24 +97,20 @@ test("time semantics remain in the schema context when sample retrieval fails", 
   assert.match(prompt, /MISSING_TIME_CONTEXT/);
 });
 
-test("initial and correction prompts preserve requested tasks and explicit time semantics", async () => {
+test("initial and correction requests preserve schema time guidance and the original question", async () => {
   const h = setup({ actualGenerator: true }); const calls = [];
   h.ui.mockConn.query = async () => table([{ scheduled_arrival_time: "19:35:57", predicted_arrival_time: "2026-08-18T19:51:00-04:00" }]);
-  h.ui.callGroqChat = async (key, model, system, user) => {
-    calls.push({ system, user });
-    return { ok: true, json: async () => ({ choices: [{ message: { content: 'SELECT "predicted_arrival_time" FROM data.gtfsrt_trip_updates_v1' } }] }) };
+  h.ui.mockStaffSession.requestReport = async body => {
+    calls.push(body); return { sql: 'SELECT "predicted_arrival_time" FROM data.gtfsrt_trip_updates_v1', model: "openai/gpt-oss-120b", reportId: "test-report" };
   };
-  await h.ui.generateSqlWithGroq("mock-key", "Show predicted arrival timestamps");
-  await h.ui.generateSqlWithGroq("mock-key", "Show predicted arrival timestamps", "invalid timestamp");
+  const first = await h.ui.generateSqlWithBackend("Show predicted arrival timestamps");
+  await h.ui.generateSqlWithBackend("Show predicted arrival timestamps", "invalid timestamp", null, first.generation);
   for (const call of calls) {
-    assert.match(call.system, /without inventing delay calculations/);
-    assert.match(call.system, /Never prepend a date to a full ISO timestamp/);
-    assert.match(call.system, /TRY_CAST\(column AS TIMESTAMPTZ\)/);
-    assert.match(call.system, /\/ 60\.0/);
-    assert.match(call.system, /no confirmed service date/i);
-    assert.match(call.system, /2026-08-18T19:51:00-04:00/);
+    assert.match(call.schema, /no confirmed service date/i);
+    assert.match(call.schema, /2026-08-18T19:51:00-04:00/);
+    assert.equal(call.question, "Show predicted arrival timestamps");
   }
-  assert.match(calls[1].user, /do not fix type errors by inventing dates or discarding timezone offsets/);
+  assert.equal(calls[1].error, "invalid timestamp"); assert.equal(calls[1].reportId, "test-report");
 });
 
 test("missing time context becomes an actionable message before SQL execution or another API attempt", async () => {
@@ -126,7 +121,7 @@ test("missing time context becomes an actionable message before SQL execution or
   }
   h.ui.aiQuestionInput.value = "Calculate arrival delay minutes from trip updates";
   const pending = h.ask(); await new Promise(setImmediate);
-  h.apiCalls[0].resolve({ ok: true, json: async () => ({ choices: [{ message: { content: "MISSING_TIME_CONTEXT" } }] }) });
+  h.apiCalls[0].resolve({ sql: "MISSING_TIME_CONTEXT", model: "openai/gpt-oss-120b", reportId: "test-report" });
   await pending;
   assert.equal(h.apiCalls.length, 1);
   assert.equal(h.queries.length, 0);

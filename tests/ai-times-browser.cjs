@@ -1,6 +1,6 @@
 // Real Chrome/DuckDB timestamp integration, using an isolated in-memory fixture.
 // Usage: node tests/ai-times-browser.cjs <temporary playwright-core prefix> [--live-ai]
-// The optional live mode requires GROQ_API_KEY in this process's environment.
+// Live AI is verified through the protected application in the approved deployment checkpoint.
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const http = require("node:http");
@@ -9,13 +9,15 @@ const { createRequire } = require("node:module");
 const fixtureSql = require("./fixtures/trip-times.cjs");
 assert(process.argv[2], "Provide a temporary prefix containing playwright-core.");
 const { chromium } = createRequire(path.join(path.resolve(process.argv[2]), "verify.cjs"))("playwright-core");
-const live = process.argv.includes("--live-ai");
-if (live) assert(process.env.GROQ_API_KEY, "Set GROQ_API_KEY locally before using --live-ai; never paste a key into chat.");
+assert(!process.argv.includes('--live-ai'), 'Use the protected application for separately approved live AI verification.');
 const root = path.join(__dirname, "..");
 const files = new Map([
   ["/", ["index.html", "text/html"]],
   ["/assets/styles.css", ["assets/styles.css", "text/css"]],
-  ["/assets/app.js", ["assets/app.js", "text/javascript"]]
+  ["/assets/app.js", ["assets/app.js", "text/javascript"]],
+  ["/assets/staff-auth.mjs", ["assets/staff-auth.mjs", "text/javascript"]],
+  ["/assets/staff-config.json", ["assets/staff-config.json", "application/json"]],
+  ["/assets/msal-browser.min.js", ["node_modules/@azure/msal-browser/lib/msal-browser.min.js", "text/javascript"]]
 ]);
 const expectedMinutes = { dst_fallback: 10, extended_clock: 2, fractional: 1.5, invalid: null, midnight: 3, missing: null, negative: -1, normal: 2, same_instant: 0 };
 function minutesByTrip(rows) { return Object.fromEntries(rows.map(row => [row.trip_id, row.elapsed_minutes === "" ? null : Number(row.elapsed_minutes)])); }
@@ -45,10 +47,7 @@ async function main() {
     browser = await chromium.launch({ executablePath: "C:/Program Files/Google/Chrome/Application/chrome.exe", headless: true });
     const page = await browser.newPage(); const errors = []; let apiCalls = 0;
     page.on("pageerror", error => errors.push(error.message));
-    await page.route("https://api.groq.com/**", route => {
-      if (route.request().method() !== "OPTIONS") apiCalls++;
-      return live ? route.continue() : route.abort();
-    });
+    await page.route('https://api.groq.com/**', route => {apiCalls++; return route.abort();});
     await page.goto(`http://127.0.0.1:${server.address().port}`);
     await page.waitForFunction(() => globalThis.aiCheck?.conn && document.querySelector("#dbStatusText").textContent.includes("Connected"), null, { timeout: 60000 });
     await page.evaluate(sql => aiCheck.setup(sql), fixtureSql);
@@ -73,34 +72,9 @@ async function main() {
     assert(context.includes('"predicted_arrival_time"="2026-08-18T19:51:00-04:00"'));
     assert.match(context, /no confirmed service date/i);
     console.log("PASS: Real schema context includes both clock and full dated timestamp samples plus missing-service-date guidance");
-    await page.locator("#tab-ai").click();
-    const question = page.locator("#aiQuestionInput"); const create = page.locator("#askAiBtn");
-    await question.fill("Show CARTA Trip Updates & Delays (GTFS-RT)"); await create.click();
-    await page.getByText("Report ready (standard report; no AI request).", { exact: true }).waitFor();
-    const snapshot = await page.evaluate(() => aiCheck.snapshot);
-    assert.equal(snapshot.rows.length, 9); assert.equal(snapshot.report.truncated, false);
-    assert.equal(snapshot.rows.find(row => row.trip_id === "extended_clock").scheduled_arrival_time, "25:10:00");
-    assert(!snapshot.columns.includes("delay_minutes")); assert.equal(apiCalls, 0);
-    console.log("PASS: Exact screenshot browsing request returns every fixture record without an API key or invented delay calculation");
-    if (live) {
-      await page.locator("#groqApiKeyInput").fill(process.env.GROQ_API_KEY);
-      for (const model of ["openai/gpt-oss-120b", "openai/gpt-oss-20b"]) {
-        await page.locator("#aiSettings").evaluate(element => { element.open = true; });
-        await page.locator("#groqModelSelect").selectOption(model);
-        await question.fill('Using gtfsrt_trip_updates_v1, list trip_id and calculate elapsed minutes between predicted_arrival_time and predicted_departure_time. Call the result elapsed_minutes. Include every row ordered by trip_id. Invalid or missing inputs must produce NULL.');
-        await create.click(); await page.waitForFunction(() => !document.querySelector("#askAiBtn").disabled, null, { timeout: 90000 });
-        const result = await page.evaluate(() => aiCheck.snapshot);
-        assert(result.report, `Live ${model} calculation failed: ${await page.locator("#errorBanner").textContent()}`);
-        assert.deepEqual(minutesByTrip(result.rows), expectedMinutes, model);
-        const usedModel = await page.locator("#groqModelSelect").inputValue();
-        assert.equal(usedModel, model, "Fallback success must not count as verification of the requested model");
-        await question.fill("Calculate arrival delay minutes between scheduled_arrival_time and predicted_arrival_time in gtfsrt_trip_updates_v1.");
-        await create.click(); await page.waitForFunction(() => !document.querySelector("#askAiBtn").disabled, null, { timeout: 90000 });
-        assert.match(await page.locator("#errorBanner").textContent(), /confirmed service date and timezone/);
-        assert.equal((await page.evaluate(() => aiCheck.snapshot)).report, null);
-        console.log(`PASS: Live ${model} returned exact known elapsed minutes and declined an unsupported schedule-delay calculation`);
-      }
-    } else { console.log("NOT RUN: Live model generation; use --live-ai with a locally configured GROQ_API_KEY."); }
+    assert.equal(await page.locator('#tab-ai').isVisible(), false);
+    assert.equal(apiCalls, 0);
+    console.log('PASS: Anonymous reporting and time calculations require no Microsoft session or AI calls');
     assert.deepEqual(errors, [], "No unhandled browser errors");
   } finally {
     if (browser) await browser.close();

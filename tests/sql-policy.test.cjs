@@ -90,7 +90,7 @@ const context = {
   } }
 };
 vm.createContext(context);
-vm.runInContext(source.slice(source.indexOf("    async function validateCartaSql("), source.indexOf("    async function callGroqChat(")), context);
+vm.runInContext(source.slice(source.indexOf("    async function validateCartaSql("), source.indexOf("    async function generateSqlWithBackend(")), context);
 
 for (const [name, sql] of allowed) test("allows " + name, async () => {
   const before = closes;
