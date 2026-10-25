@@ -188,7 +188,7 @@
       font-weight: 700;
     }
 
-    /* Preset Report Cards */
+    /* One-click report buttons */
     .preset-grid {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(min(260px, 100%), 1fr));
@@ -196,35 +196,48 @@
     }
 
     .preset-card {
-      background: #f8fafc;
-      border: 1px solid var(--border);
+      background: #f5f9ff;
+      border: 2px solid var(--primary);
       border-radius: 8px;
       padding: 0.95rem 1rem;
       text-align: left;
+      font-family: inherit;
       cursor: pointer;
-      transition: all 0.15s ease;
+      box-shadow: 0 3px 0 #b4cde8;
+      transition: background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
       display: flex;
-      flex-direction: column;
+      align-items: center;
       justify-content: space-between;
-      gap: 0.4rem;
-      min-height: 76px;
+      gap: 1rem;
+      min-height: 96px;
+      width: 100%;
     }
 
     .preset-card:hover {
-      border-color: var(--primary);
-      background: #eff6ff;
+      border-color: var(--primary-hover);
+      background: #e8f1ff;
       transform: translateY(-1px);
-      box-shadow: 0 3px 8px rgba(0, 86, 179, 0.08);
+      box-shadow: 0 4px 0 #a1bfdf;
     }
 
+    .preset-card:active {
+      background: #dbeafe;
+      transform: translateY(2px);
+      box-shadow: 0 1px 0 #a1bfdf;
+    }
+
+    .preset-card-copy { display: flex; flex-direction: column; gap: 0.35rem; min-width: 0; }
+    .preset-card-arrow { flex: 0 0 24px; color: var(--primary); }
+
     .preset-card-title {
-      font-weight: 600;
+      font-weight: 700;
       font-size: 0.95rem;
       color: var(--text);
     }
 
     .preset-card-desc {
       font-size: 0.82rem;
+      line-height: 1.45;
       color: var(--muted);
     }
 
@@ -620,6 +633,6 @@
 
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after { transition: none !important; }
-      .preset-card:hover { transform: none; }
+      .preset-card:hover, .preset-card:active { transform: none; }
     }
   

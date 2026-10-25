@@ -211,7 +211,7 @@ async function main() {
     assert.equal(await page.locator("#reportDetails").evaluate(element => element.open), false);
     assert.equal(await page.locator("#downloadHelp").evaluate(element => element.open), false);
     assert.equal(await page.locator("#stopReportBtn").isVisible(), false);
-    const routes = page.getByRole("button", { name: "Bus routes", exact: true });
+    const routes = page.getByRole("button", { name: /^View bus routes\b/ });
     await tabTo(routes);
     const focusStyle = await routes.evaluate(element => ({ visible: element.matches(":focus-visible"), width: getComputedStyle(element).outlineWidth, style: getComputedStyle(element).outlineStyle }));
     assert(focusStyle.visible && focusStyle.style === "solid" && parseFloat(focusStyle.width) >= 3);

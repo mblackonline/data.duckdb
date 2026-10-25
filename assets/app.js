@@ -111,6 +111,7 @@
     const PRESET_REPORTS = [
       {
         title: "Latest Bus Vehicle Positions",
+        buttonLabel: "View bus positions",
         tag: "Customer Service",
         desc: "Latest reported bus locations.",
         sql: 'SELECT "vehicle_id", "route_id", "trip_id", "trip_start_date", "trip_start_time", "direction_id", "direction", "headsign", "latitude", "longitude", "speed", "bearing", "timestamp", "schedule_relationship" FROM data.gtfsrt_vehicle_positions_v1 ORDER BY NULLIF("timestamp", 0) DESC NULLS LAST;',
@@ -118,6 +119,7 @@
       },
       {
         title: "Clever Vehicle Locations",
+        buttonLabel: "View Clever locations",
         tag: "Operations / Paratransit",
         desc: "Vehicle locations from Clever Devices.",
         sql: 'SELECT "vehicle_id", "route", "block_id", "destination", "heading", "latitude", "longitude", "pattern_id", "pattern_distance", "scheduled_start_date", "scheduled_start_time", "speed", "trip_id", "timestamp" FROM data.clever_vehicle_locations_v1 ORDER BY TRY_CAST("timestamp" AS TIMESTAMPTZ) DESC NULLS LAST;',
@@ -125,6 +127,7 @@
       },
       {
         title: "Stop Predictions (Clever)",
+        buttonLabel: "View arrival predictions",
         tag: "Customer Service",
         desc: "Predicted arrivals at bus stops.",
         sql: `SELECT "tmstmp", "typ", "stpnm", "stpid", "vid", "dstp", "rt", "rtdd", "rtdir", "des", "prdtm", "tablockid", "tatripid", "origtatripno", "dly", "dyn", "prdctdn", "zone", "nbus", "psgld", "stst", "stsd", "flagstop" FROM data.clever_predictions_v1 ORDER BY try_strptime("tmstmp", '%Y%m%d %H:%M') DESC NULLS LAST, try_strptime("prdtm", '%Y%m%d %H:%M') ASC NULLS LAST;`,
@@ -132,6 +135,7 @@
       },
       {
         title: "Trip Updates & Delays (GTFS-RT)",
+        buttonLabel: "View trip updates",
         tag: "Customer Service",
         desc: "Published trip and stop updates.",
         sql: 'SELECT "service_id", "route_id", "trip_id", "direction_id", "stop_headsign", "trip_start_time", "stop_id", "stop_code", "stop_name", "stop_sequence", "stop_sequence_actual", "schedule_relationship", "vehicle_id", "scheduled_arrival_time", "scheduled_departure_time", "predicted_arrival_time", "predicted_departure_time", "latitude", "longitude" FROM data.gtfsrt_trip_updates_v1;',
@@ -139,26 +143,30 @@
       },
       {
         title: "CARTA Bus Routes",
+        buttonLabel: "View bus routes",
         tag: "Reference",
-        desc: "",
+        desc: "Route numbers and names.",
         sql: 'SELECT "id", "name", "color" FROM data.simple_bus_routes ORDER BY "id";',
       },
       {
         title: "CARTA Bus Stops",
+        buttonLabel: "View bus stops",
         tag: "Customer Service",
-        desc: "",
+        desc: "Stop names, locations, and routes.",
         sql: 'SELECT "id", "name", "latitude", "longitude", "route_ids" FROM data.simple_bus_stops ORDER BY "id";',
       },
       {
         title: "CARTA Monthly Ridership (NTD)",
+        buttonLabel: "View monthly ridership",
         tag: "Management",
-        desc: "",
+        desc: "Monthly ridership and service measures.",
         sql: `SELECT "NTD ID", "Legacy NTD ID", "Agency", "Mode/Type of Service Status", "Reporter Type", "UACE CD", "UZA Name", "Mode", "TOS", "3 Mode", "Date", "UPT", "VOMS", "VRH", "VRM", "Agency Mode TOS Date", "State", "FTA Region" FROM data.ntd_monthly_ridership_v1 WHERE "NTD ID" = '${CARTA_NTD_ID}' ORDER BY "Date" DESC;`,
       },
       {
         title: "Bike Chattanooga Stations",
+        buttonLabel: "View bike stations",
         tag: "Mobility",
-        desc: "",
+        desc: "Station locations and bike availability.",
         sql: 'SELECT "station_id", "external_id", "name", "physical_configuration", "latitude", "longitude", "altitude", "address", "post_code", "capacity", "charging_station", "key", "transitcard", "creditcard", "phone", "virtual_station", "groups", "last_updated", "bikes_available", "bikes_disabled", "status", "docks_available", "docks_disabled", "last_reported", "installed", "renting", "returning", "FIT", "BOOST", "ICONIC", "EFIT", "CHLOE", "cross_street" FROM data.bike_chattanooga_stations_v1 ORDER BY "station_id";',
       }
     ];
@@ -325,17 +333,21 @@
       });
     });
 
-    // Render Preset Cards
+    // Render one-click report buttons
     function renderPresets() {
       presetGrid.innerHTML = "";
       PRESET_REPORTS.forEach((report) => {
         const btn = document.createElement("button");
+        btn.type = "button";
         btn.className = "preset-card";
         btn.innerHTML = `
-          <div>
-            <div class="preset-card-title">${escapeHtml(reportDisplayTitle(report.title))}</div>
-            ${report.desc ? `<div class="preset-card-desc">${escapeHtml(report.desc)}</div>` : ""}
-          </div>
+          <span class="preset-card-copy">
+            <span class="preset-card-title">${escapeHtml(report.buttonLabel)}</span>
+            <span class="preset-card-desc">${escapeHtml(report.desc)}</span>
+          </span>
+          <svg class="preset-card-arrow" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false">
+            <path d="M4 12h15m-6-6 6 6-6 6" />
+          </svg>
         `;
         btn.addEventListener("click", () => {
           // executeQuery displays active-report errors; handle the event's rejected promise.
