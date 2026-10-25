@@ -36,6 +36,7 @@ const allowed = [
   ["UNION", "SELECT route_id FROM data.simple_bus_routes UNION ALL SELECT route_id FROM data.simple_bus_routes"],
   ["constant helper CTE", "WITH n AS (SELECT 1 AS number) SELECT COUNT(*) FROM data.simple_bus_routes CROSS JOIN n"],
   ["ILIKE", "SELECT * FROM data.simple_bus_stops WHERE stop_name ILIKE '%Market%'"],
+  ["literal text matching with escaped wildcards", "SELECT * FROM data.simple_bus_stops WHERE stop_name ILIKE '%50$%$_$$%' ESCAPE '$'"],
   ...presets.map(report => ["preset: " + report.title, report.sql])
 ];
 const blocked = [

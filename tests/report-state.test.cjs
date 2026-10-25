@@ -538,7 +538,7 @@ for (const failStartup of [false, true]) {
     h.ui.renderPresets = () => {};
     h.ui.populateDatasetDropdown = () => {};
     h.ui.REMOTE_DUCKDB_URL = "https://example.invalid/catalog.duckdb";
-    vm.runInContext(section("    async function initDuckDB()", "    function populateDatasetDropdown()"), h.ui);
+    vm.runInContext(section("    async function initDuckDB()", "    async function populateDatasetDropdown()"), h.ui);
     await h.ui.initDuckDB();
     assert(suppliedLogger instanceof VoidLogger);
     assert.deepEqual(logs, []);

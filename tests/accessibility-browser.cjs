@@ -51,7 +51,7 @@ const fixtureModule = `
   function connection() { return {
     query: async sql => {
       if (sql.includes('duckdb_views()')) return table([{view_name: 'simple_bus_routes'}]);
-      if (sql.startsWith('DESCRIBE')) return table(Object.keys(rows[0]).map(column_name => ({column_name, column_type: 'VARCHAR'})));
+      if (sql.startsWith('DESCRIBE')) return table(Object.keys(rows[0]).map(column_name => ({column_name, column_type: typeof rows[0][column_name] === 'number' ? 'DOUBLE' : 'VARCHAR'})));
       return table([rows[0]]);
     },
     prepare: async statement => ({
@@ -191,6 +191,8 @@ async function main() {
     await audit('Signed in with confirmed application access');
     await page.screenshot({path: path.join(output, 'staff-authorized.png'), fullPage: true});
     await page.locator('#staffSignOutBtn').focus();
+    await page.keyboard.press("Tab");
+    assert.equal(await page.locator('.header-link').evaluate(element => element === document.activeElement), true);
     await page.keyboard.press("Tab"); await selected("tab-presets");
     await page.keyboard.press("ArrowRight"); await selected("tab-builder");
     await page.keyboard.press("Tab"); assert.equal(await focusedId(), "panel-builder");
@@ -269,6 +271,32 @@ async function main() {
 
     await page.setViewportSize({ width: 1280, height: 900 });
     await page.locator("#tab-builder").click(); await audit("Builder tab");
+    await page.locator("#builderColumn").selectOption("Route");
+    assert.deepEqual(await page.locator("#builderOperator option").evaluateAll(options => options.map(option => option.value)), ["ILIKE_CONTAINS", "=", "ILIKE_STARTS", "EMPTY_TEXT", "IS NULL", "IS NOT NULL"]);
+    assert.match(await page.locator("#builderHelp").textContent(), /contains text/);
+    await page.locator("#builderOperator").selectOption("=");
+    await page.locator("#builderValue").fill("001");
+    await page.locator("#runBuilderBtn").click();
+    await page.waitForFunction(() => document.querySelector("#sqlQueryBox").value.includes(`"Route" = '001'`));
+    await page.locator("#builderValue").fill(""); await page.locator("#runBuilderBtn").click();
+    assert.match(await page.locator("#builderError").textContent(), /Enter a filter value/);
+    assert.equal(await focusedId(), "builderValue");
+    await audit("Builder validation message");
+    await page.locator("#builderOperator").selectOption("IS NULL");
+    assert(await page.locator("#builderValue").isDisabled());
+    await page.locator("#runBuilderBtn").click();
+    await page.waitForFunction(() => document.querySelector("#sqlQueryBox").value.includes('"Route" IS NULL'));
+    await page.locator("#builderColumn").selectOption("Longitude");
+    assert.deepEqual(await page.locator("#builderOperator option").evaluateAll(options => options.map(option => option.value)), ["=", ">", "<", ">=", "<=", "IS NULL", "IS NOT NULL"]);
+    await page.locator("#builderOperator").selectOption(">");
+    await page.locator("#builderValue").fill("oops"); await page.locator("#runBuilderBtn").click();
+    assert.match(await page.locator("#builderError").textContent(), /Enter a valid number/);
+    await page.locator("#builderValue").fill("1.5"); await page.locator("#runBuilderBtn").click();
+    await page.waitForFunction(() => document.querySelector("#sqlQueryBox").value.includes('"Longitude" > 1.5'));
+    await page.locator("#panel-builder").screenshot({ path: path.join(output, "builder-field-validation.png") });
+    await page.locator("#builderColumn").selectOption("");
+    assert(await page.locator("#builderOperator").isDisabled()); assert(await page.locator("#builderValue").isDisabled());
+    console.log("PASS: builder offers field-aware conditions, preserves text identifiers, validates values, handles nulls, and announces accessible inline guidance");
     for (const width of [640, 320]) {
       await page.setViewportSize({ width, height: 900 });
       for (const panel of ["presets", "builder", "ai"]) {

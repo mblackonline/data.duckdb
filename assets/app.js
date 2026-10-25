@@ -197,6 +197,8 @@
     const builderColumn = document.getElementById("builderColumn");
     const builderOperator = document.getElementById("builderOperator");
     const builderValue = document.getElementById("builderValue");
+    const builderHelp = document.getElementById("builderHelp");
+    const builderError = document.getElementById("builderError");
     const builderSortCol = document.getElementById("builderSortCol");
     const builderSortDir = document.getElementById("builderSortDir");
     const runBuilderBtn = document.getElementById("runBuilderBtn");
@@ -401,10 +403,9 @@
         `);
         availableViews = viewsResult.toArray().map((r) => r.view_name);
 
-        populateDatasetDropdown();
+        await populateDatasetDropdown();
         dbStatusDot.classList.add("ready");
         dbStatusText.textContent = `Connected (${availableViews.length} CARTA datasets ready)`;
-        runBuilderBtn.disabled = false;
         runCustomSqlBtn.disabled = false;
         askAiBtn.disabled = !aiAuthorized;
         rowsPerPage.disabled = false;
@@ -415,7 +416,7 @@
       }
     }
 
-    function populateDatasetDropdown() {
+    async function populateDatasetDropdown() {
       builderDataset.innerHTML = "";
       availableViews.forEach((viewName) => {
         const info = DATASET_INFO[viewName];
@@ -425,7 +426,7 @@
         builderDataset.appendChild(opt);
       });
       if (availableViews.length > 0) {
-        loadColumnsForDataset(availableViews[0]);
+        await loadColumnsForDataset(availableViews[0]);
       }
     }
 
@@ -433,7 +434,7 @@
       if (schemaCache[viewName]) {
         return schemaCache[viewName];
       }
-      const res = await conn.query(`DESCRIBE SELECT * FROM data.${viewName};`);
+      const res = await conn.query(`DESCRIBE SELECT * FROM data."${viewName.replace(/"/g, '""')}";`);
       const cols = res.toArray().map((row) => ({
         name: row.column_name,
         type: row.column_type
@@ -442,11 +443,75 @@
       return cols;
     }
 
+    // The schema decides which comparisons are meaningful, never the field name or input text.
+    const BUILDER_CONDITIONS = {
+      ILIKE_CONTAINS: "Contains", "=": "Equals (=)", ILIKE_STARTS: "Starts with",
+      ">": "Greater than (>)", "<": "Less than (<)", ">=": "Greater or equal (>=)", "<=": "Less or equal (<=)",
+      EMPTY_TEXT: "Is blank text", "IS NULL": "Is missing (null)", "IS NOT NULL": "Is not missing (null)"
+    };
+    const BUILDER_NO_VALUE = new Set(["IS NULL", "IS NOT NULL", "EMPTY_TEXT"]);
+    let builderLoadId = 0;
+    let builderEditId = 0;
+    let builderReadyView = null;
+
+    function builderFieldRules(column) {
+      const type = String(column?.type || "").toUpperCase().trim();
+      let kind = "other";
+      if (/^(VARCHAR|CHAR|BPCHAR|TEXT|STRING)(\(\d+\))?$/.test(type)) kind = "text";
+      else if (/^(U?(TINYINT|SMALLINT|INTEGER|BIGINT|HUGEINT)|INT[1248]?|UINT(8|16|32|64|128)|FLOAT|REAL|DOUBLE|DOUBLE PRECISION|DECIMAL\(\d+,\s*\d+\)|NUMERIC\(\d+,\s*\d+\))$/.test(type)) kind = "number";
+      else if (/^(BOOLEAN|BOOL)$/.test(type)) kind = "boolean";
+      else if (/^(DATE|TIME|TIMETZ|TIME WITH TIME ZONE|TIMESTAMP|TIMESTAMPTZ|TIMESTAMP_(S|MS|NS)|TIMESTAMP WITH TIME ZONE)$/.test(type)) kind = "date";
+      const conditions = kind === "text" ? ["ILIKE_CONTAINS", "=", "ILIKE_STARTS", "EMPTY_TEXT"]
+        : ["number", "date"].includes(kind) ? ["=", ">", "<", ">=", "<="]
+        : kind === "boolean" ? ["="] : [];
+      return { kind, type, conditions: [...conditions, "IS NULL", "IS NOT NULL"] };
+    }
+
+    function updateBuilderValueState() {
+      builderValue.disabled = builderOperator.disabled || BUILDER_NO_VALUE.has(builderOperator.value);
+    }
+
+    function updateBuilderConditions() {
+      const column = schemaCache[builderReadyView]?.find(c => c.name === builderColumn.value);
+      const previous = builderOperator.value;
+      builderOperator.innerHTML = "";
+      builderOperator.disabled = !column;
+      if (column) {
+        const rules = builderFieldRules(column);
+        for (const condition of rules.conditions) {
+          const option = document.createElement("option");
+          option.value = condition;
+          option.textContent = BUILDER_CONDITIONS[condition];
+          builderOperator.appendChild(option);
+        }
+        if (rules.conditions.includes(previous)) builderOperator.value = previous;
+        builderHelp.textContent = rules.kind === "text"
+          ? `${column.name} contains text. Use text matching; number comparisons are unavailable. Blank text and missing values have separate conditions.`
+          : rules.kind === "number" ? "Enter a number, without commas or units."
+          : rules.kind === "boolean" ? "Enter true or false."
+          : rules.kind === "date" ? "Enter a date (YYYY-MM-DD), time (HH:MM:SS), or date and time to match this field."
+          : "This field supports missing-value checks. Use the SQL editor for other comparisons.";
+      } else {
+        builderHelp.textContent = "Choose a filter column to see its conditions, or run the dataset without a filter.";
+      }
+      updateBuilderValueState();
+    }
+
     async function loadColumnsForDataset(viewName) {
+      const loadId = ++builderLoadId;
+      ++builderEditId;
+      builderReadyView = null;
+      builderError.textContent = "";
+      builderValue.value = "";
+      runBuilderBtn.disabled = true;
+      builderColumn.disabled = true;
+      builderSortCol.disabled = true;
       builderColumn.innerHTML = `<option value="">Loading columns...</option>`;
       builderSortCol.innerHTML = `<option value="">Loading columns...</option>`;
+      updateBuilderConditions();
       try {
         const cols = await getColumnsForView(viewName);
+        if (loadId !== builderLoadId || viewName !== builderDataset.value) return;
         builderColumn.innerHTML = `<option value="">(No column filter)</option>`;
         builderSortCol.innerHTML = `<option value="">(Default order)</option>`;
         cols.forEach((c) => {
@@ -460,51 +525,115 @@
           opt2.textContent = `${c.name} (${c.type})`;
           builderSortCol.appendChild(opt2);
         });
+        builderReadyView = viewName;
+        builderColumn.disabled = false;
+        builderSortCol.disabled = false;
+        runBuilderBtn.disabled = !conn;
       } catch (err) {
+        if (loadId !== builderLoadId || viewName !== builderDataset.value) return;
         builderColumn.innerHTML = `<option value="">(Could not load columns)</option>`;
         builderSortCol.innerHTML = `<option value="">(Default order)</option>`;
+        builderError.textContent = "Could not load this dataset's fields. Select the dataset again to retry.";
       }
+      updateBuilderConditions();
     }
 
     builderDataset.addEventListener("change", () => {
       loadColumnsForDataset(builderDataset.value);
     });
 
+    builderColumn.addEventListener("change", () => {
+      ++builderEditId;
+      builderValue.value = "";
+      builderError.textContent = "";
+      updateBuilderConditions();
+    });
+    for (const [control, event] of [[builderOperator, "change"], [builderValue, "input"], [builderSortCol, "change"], [builderSortDir, "change"]]) {
+      control.addEventListener(event, () => {
+        ++builderEditId;
+        builderError.textContent = "";
+        updateBuilderValueState();
+      });
+    }
+
+    function builderValidationError(message, control) {
+      return Object.assign(new Error(message), { control });
+    }
+
+    async function builderValueSql(column, operator, rawValue) {
+      const rules = builderFieldRules(column);
+      if (!rules.conditions.includes(operator)) {
+        throw builderValidationError(`Choose a condition offered for ${column.name}. ${rules.kind === "text" ? "This field contains text, so number comparisons are unavailable." : ""}`, builderOperator);
+      }
+      if (BUILDER_NO_VALUE.has(operator)) return null;
+      // Keep text exactly as entered, including leading zeros and spaces.
+      const value = rules.kind === "text" ? rawValue : rawValue.trim();
+      if (!value.trim()) throw builderValidationError("Enter a filter value, or choose a blank-text or missing-value condition when available.", builderValue);
+      if (rules.kind === "number" && (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(value) || !Number.isFinite(Number(value)))) {
+        throw builderValidationError("Enter a valid number, without commas or units.", builderValue);
+      }
+      if (rules.kind === "boolean" && !/^(true|false)$/i.test(value)) {
+        throw builderValidationError("Enter true or false for this field.", builderValue);
+      }
+      const literal = `'${value.replace(/'/g, "''")}'`;
+      if (rules.kind === "text") return literal;
+      // Check only the constant, without reading dataset records. Types above are allowlisted.
+      // Comparing numeric literals directly avoids rounding a decimal threshold to an integer.
+      const expression = rules.kind === "number" ? value : `CAST(${literal} AS ${rules.type})`;
+      if (rules.kind !== "number") {
+        let checked;
+        try { checked = await conn.query(`SELECT TRY_CAST(${literal} AS ${rules.type}) IS NOT NULL AS valid;`); }
+        catch { throw builderValidationError("Could not check this value. Try again, or reconnect to the data.", builderValue); }
+        if (!checked.get(0).valid) throw builderValidationError(`Enter a valid ${rules.kind === "boolean" ? "true or false value" : "date or time for this field"}.`, builderValue);
+      }
+      return expression;
+    }
+
     // Build and execute query from Visual Filter Builder
-    runBuilderBtn.addEventListener("click", () => {
+    runBuilderBtn.addEventListener("click", async () => {
+      const editId = ++builderEditId;
+      builderError.textContent = "";
       const view = builderDataset.value;
       const col = builderColumn.value;
       const op = builderOperator.value;
-      const val = builderValue.value.trim();
+      const val = builderValue.value;
       const sortCol = builderSortCol.value;
       const sortDir = builderSortDir.value;
 
-      let sql = `SELECT * FROM data."${view}"`;
-      if (col) {
-        const safeCol = `"${col.replace(/"/g, '""')}"`;
-        const safeVal = val.replace(/'/g, "''");
-        if (op === "IS NOT NULL") {
-          sql += ` WHERE ${safeCol} IS NOT NULL`;
-        } else if (val !== "") {
-          if (op === "ILIKE_CONTAINS") {
-            sql += ` WHERE CAST(${safeCol} AS VARCHAR) ILIKE '%${safeVal}%'`;
-          } else if (op === "ILIKE_STARTS") {
-            sql += ` WHERE CAST(${safeCol} AS VARCHAR) ILIKE '${safeVal}%'`;
-          } else {
-            const isNum = !isNaN(Number(val)) && val !== "";
-            const rhs = isNum ? val : `'${safeVal}'`;
-            sql += ` WHERE ${safeCol} ${op} ${rhs}`;
-          }
+      try {
+        if (!conn || view !== builderReadyView || !availableViews.includes(view)) {
+          throw builderValidationError("Wait for the dataset's fields to load before running a report.", builderDataset);
         }
-      }
-      if (sortCol) {
-        const safeSort = `"${sortCol.replace(/"/g, '""')}"`;
-        sql += ` ORDER BY ${safeSort} ${sortDir}`;
-      }
-      sql += ";";
+        const columns = schemaCache[view];
+        if (sortCol && !columns.some(c => c.name === sortCol)) throw builderValidationError("Choose a sort column from this dataset.", builderSortCol);
+        if (!["ASC", "DESC"].includes(sortDir)) throw builderValidationError("Choose an available sort direction.", builderSortDir);
+        let sql = `SELECT * FROM data."${view.replace(/"/g, '""')}"`;
+        if (col) {
+          const column = columns.find(c => c.name === col);
+          if (!column) throw builderValidationError("Choose a filter column from this dataset.", builderColumn);
+          const rhs = await builderValueSql(column, op, val);
+          const safeCol = `"${col.replace(/"/g, '""')}"`;
+          if (["IS NULL", "IS NOT NULL"].includes(op)) sql += ` WHERE ${safeCol} ${op}`;
+          else if (op === "EMPTY_TEXT") sql += ` WHERE ${safeCol} = ''`;
+          else if (op === "ILIKE_CONTAINS" || op === "ILIKE_STARTS") {
+            const pattern = val.replace(/[$%_]/g, "$$$&").replace(/'/g, "''");
+            sql += ` WHERE ${safeCol} ILIKE '${op === "ILIKE_CONTAINS" ? "%" : ""}${pattern}%' ESCAPE '$'`;
+          } else sql += ` WHERE ${safeCol} ${op} ${rhs}`;
+        }
+        if (sortCol) {
+          const safeSort = `"${sortCol.replace(/"/g, '""')}"`;
+          sql += ` ORDER BY ${safeSort} ${sortDir}`;
+        }
+        sql += ";";
 
-      const label = DATASET_INFO[view]?.label || view;
-      executePagedQuery(sql, label).catch(() => {});
+        if (editId !== builderEditId || !conn) return;
+        const label = DATASET_INFO[view]?.label || view;
+        executePagedQuery(sql, label).catch(() => {});
+      } catch (err) {
+        if (editId !== builderEditId) return;
+        builderError.textContent = err.message;
+        err.control?.focus();
+      }
     });
 
     runCustomSqlBtn.addEventListener("click", () => {
@@ -1346,7 +1475,7 @@ FROM parsed ORDER BY "trip_id";`;
       }
       const allowedViews = new Set(views.map((view) => view.toLowerCase()));
       const allowedFunctions = new Set([
-        "+", "-", "*", "/", "//", "%", "**", "^", "||", "~~", "!~~", "~~*", "!~~*",
+        "+", "-", "*", "/", "//", "%", "**", "^", "||", "~~", "!~~", "~~*", "!~~*", "ilike_escape",
         "abs", "round", "ceil", "ceiling", "floor", "sqrt", "pow", "power", "sign",
         "sum", "avg", "count", "count_star", "min", "max", "median", "mode", "stddev", "stddev_pop", "stddev_samp", "variance", "var_pop", "var_samp",
         "first", "last", "any_value", "arg_min", "arg_max", "string_agg", "list", "array_agg", "bool_and", "bool_or", "approx_count_distinct",

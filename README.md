@@ -32,7 +32,7 @@ limits and Excel guidance.
 Run the regression checks with Node.js:
 
 ```powershell
-node --test --test-reporter=dot tests/report-state.test.cjs tests/pagination.test.cjs tests/ai-report.test.cjs tests/api-key.test.cjs tests/csv-export.test.cjs tests/full-csv.test.cjs tests/sql-policy.test.cjs tests/protected-api.test.mjs
+node --test --test-reporter=dot tests/filter-builder.test.cjs tests/report-state.test.cjs tests/pagination.test.cjs tests/ai-report.test.cjs tests/api-key.test.cjs tests/csv-export.test.cjs tests/full-csv.test.cjs tests/sql-policy.test.cjs tests/protected-api.test.mjs
 ```
 
 ## Background

@@ -62,20 +62,11 @@
         </div>
         <div class="form-group">
           <label for="builderOperator">Condition</label>
-          <select id="builderOperator">
-            <option value="ILIKE_CONTAINS">Contains</option>
-            <option value="=">Equals (=)</option>
-            <option value="ILIKE_STARTS">Starts with</option>
-            <option value=">">Greater than (&gt;)</option>
-            <option value="<">Less than (&lt;)</option>
-            <option value=">=">Greater or equal (&gt;=)</option>
-            <option value="<=">Less or equal (&lt;=)</option>
-            <option value="IS NOT NULL">Is not empty</option>
-          </select>
+          <select id="builderOperator" aria-describedby="builderHelp" disabled></select>
         </div>
         <div class="form-group">
           <label for="builderValue">Filter Value</label>
-          <input type="text" id="builderValue" placeholder="e.g. 4 or Market" />
+          <input type="text" id="builderValue" placeholder="e.g. 4 or Market" aria-describedby="builderHelp builderError" disabled />
         </div>
         <div class="form-group">
           <label for="builderSortCol">Sort By</label>
@@ -94,6 +85,8 @@
           <button id="runBuilderBtn" class="btn" disabled>Run Report</button>
         </div>
       </div>
+      <p id="builderHelp" class="panel-subtitle" role="status">Choose a filter column to see its conditions, or run the dataset without a filter.</p>
+      <div id="builderError" class="error-banner" role="alert" aria-atomic="true"></div>
     </section>
 
     <!-- TAB 3: ASK IN PLAIN ENGLISH (GROQ AI) -->
