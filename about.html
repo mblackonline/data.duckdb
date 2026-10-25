@@ -21,7 +21,7 @@
     <article class="notice-card" aria-labelledby="notice-title">
       <h1 id="notice-title">About, Data Use &amp; Acceptable Use</h1>
       <p class="notice-updated">Last updated: <time datetime="2026-10-25">October 25, 2026</time></p>
-      <p>This proof of concept explores CARTA's public transportation data through reports, filters,
+      <p>This proof of concept explores CARTA's public datasets through reports, filters,
         and an AI assistant. Public reports require no sign-in. AI features require Microsoft
         sign-in and explicit authorization.</p>
 
@@ -48,7 +48,9 @@
         <a href="https://learn.microsoft.com/en-us/entra/identity/monitoring-health/reference-reports-data-retention">log retention</a>.</p>
 
       <h2>AI requests and Groq</h2>
-      <p>AI requests pass through this site's backend to Groq, an external AI provider. The backend
+      <p>The assistant uses OpenAI's open-weight gpt-oss models hosted by Groq. Groq is the provider
+        processing these AI requests.</p>
+      <p>AI requests pass through this site's backend to Groq. The backend
         uses the operator's server-held Groq API key, and usage is attributed to the operator's Groq
         account. Your Microsoft password, sign-in token, and account identifier are not sent to Groq
         for authentication or added to the AI prompt by the application.</p>
@@ -58,6 +60,9 @@
         Generated SQL runs in your browser.</p>
       <p class="notice-warning"><strong>Do not submit passwords, API keys, personal information,
         confidential material, or other sensitive information to the AI assistant.</strong></p>
+      <p>Use only public information in your questions. A question can disclose sensitive details
+        about people or internal operations even when the requested report uses public data.
+        Review your question before submitting it.</p>
 
       <h2>Application storage and provider retention</h2>
       <p>This version of the application does not create or update persistent user profiles,
@@ -69,15 +74,39 @@
         one automatic SQL correction if a generated query fails. Provider and hosting limits still
         apply. Any usage records created by an earlier version remain until the deployment operator
         removes them.</p>
-      <p>Netlify provides hosting and backend processing. Provider operational records are governed
-        by their own policies and settings. Groq's handling of AI inputs and outputs depends on its
-        policies and the operator's data-retention settings. See
+      <!-- Deployment-specific setting confirmed by the operator. Verify the Groq organization
+           owning the deployed API key before reusing this notice for another deployment. -->
+      <p>Groq's Global Zero Data Retention (ZDR) setting is enabled for the operator's Groq
+        organization. According to Groq, this prevents retention of AI inputs and outputs for
+        system reliability and abuse monitoring and disables features that require stored content.
+        Groq still processes your question to provide an answer and collects usage metadata that
+        does not include AI inputs or outputs. Retention required by law may still apply. See
         <a href="https://console.groq.com/docs/your-data">Groq's data-handling information</a>.</p>
+      <p>Groq's published Services Agreement does not permit using AI inputs or outputs to train or
+        fine-tune models unless the customer explicitly grants permission or requests it. See
+        <a href="https://console.groq.com/docs/legal/services-agreement">Groq's Services Agreement, section 4.2</a>.</p>
+      <p>Netlify provides hosting and backend processing. Groq's ZDR setting does not change
+        Microsoft's or Netlify's operational records or retention policies, and it does not
+        establish that previously retained records have been deleted. Each provider's records
+        remain governed by its own policies and settings.</p>
+
+      <h2>Availability and alternatives</h2>
+      <p>AI reporting may be temporarily unavailable because of provider outages, usage limits,
+        sign-in problems, or hosting issues. If an AI request fails, try again later or use
+        One-Click Reports, the Visual Filter Builder, or the SQL editor. These options do not use
+        Groq, but still depend on the website and public data sources being available.</p>
+      <p>For a time-critical report, keep another way to obtain and verify the information.
+        Contact the deployment administrator if AI failures persist.</p>
 
       <h2>Report limitations and acceptable use</h2>
       <p>This service is experimental. Source data can be incomplete or delayed, and AI-generated
-        reports can contain errors. Verify results before relying on them. Refer to the original
-        data sources for licensing and reuse conditions.</p>
+        reports can contain errors. The application checks generated SQL against permitted
+        read-only queries on available datasets before running it in your browser. Those checks
+        restrict what a query can do; they do not establish that it answers your question correctly.</p>
+      <p>A query can run successfully while using the wrong dates, agency, filters, or calculations.
+        Verify AI-generated results against the source data or a known, independently checked
+        report before using them in official reporting or operational decisions. Refer to the
+        original data sources for licensing and reuse conditions.</p>
       <p>Use the service lawfully. Do not bypass access controls or provider limits, disrupt the service,
         or submit information you are not authorized to share. Access can be restricted for misuse.
         Features and availability can change as the proof of concept develops.</p>
