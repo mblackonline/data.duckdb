@@ -16,11 +16,10 @@ ATTACH 'https://gocarta.s3.us-east-2.amazonaws.com/public/duckdb/data.duckdb' as
 Browse CARTA data with One-Click Reports, the Visual Filter Builder, or the AI
 Report Assistant. Queries run in your browser using DuckDB.
 
-A hosted version is planned for Netlify.
+Open the [hosted explorer](https://carta-open-data-explorer-poc.netlify.app/).
 
-AI reporting uses Microsoft sign-in and explicit staff authorization, with the
-Groq key kept on the server. Sign-in and AI authorization are verified locally;
-live AI generation and deployment checks are pending. Non-AI reporting remains public.
+AI reporting requires Microsoft sign-in and staff authorization. Other reports
+remain public.
 
 Download report (CSV) exports the full matching report, preserving SQL limits.
 Search this page affects only the displayed page. See Download help for export
