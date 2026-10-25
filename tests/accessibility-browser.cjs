@@ -243,7 +243,7 @@ async function main() {
     assert(await page.getByRole("textbox", { name: "Report SQL", exact: true }).evaluate(element => element === document.activeElement));
     const resultTree = await page.locator(".results-card").ariaSnapshot();
     assert.match(resultTree, /textbox "Search this page"/);
-    assert.match(resultTree, /textbox "Report SQL"/);
+    assert.match(await page.locator(".sql-details").ariaSnapshot(), /textbox "Report SQL"/);
     assert.match(resultTree, /region "Report results"/);
     assert.match(resultTree, /table "Loaded report rows"/);
     await audit("Loaded and filtered report");

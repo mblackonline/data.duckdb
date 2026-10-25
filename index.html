@@ -158,6 +158,17 @@
       </div>
     </section>
 
+    <!-- Shared SQL editor for all report tools -->
+    <details class="sql-details">
+      <summary>View or edit SQL</summary>
+      <p id="sqlPolicyHelp">Run one read-only query using CARTA datasets (data.*). External sources and administrative commands are not supported.</p>
+      <label for="sqlQueryBox">Report SQL</label>
+      <div class="sql-editor-row">
+        <textarea id="sqlQueryBox" spellcheck="false" aria-describedby="sqlPolicyHelp"></textarea>
+        <button id="runCustomSqlBtn" class="btn btn-secondary" disabled>Run SQL</button>
+      </div>
+    </details>
+
     <!-- RESULTS TABLE -->
     <section class="results-card">
       <div class="results-toolbar">
@@ -223,16 +234,6 @@
           Import identifier columns as Text in Excel to preserve leading zeros and long IDs.
         </p>
         <p id="fullCsvHelp" class="panel-subtitle">Downloads read source data again. Choose a CSV destination when prompted. Stop report cancels the download and requires Reconnect. Exports must finish within 30 seconds; browsers without direct file saving allow up to 20 MiB.</p>
-      </details>
-
-      <details class="sql-details">
-        <summary>View or Edit SQL Query</summary>
-        <p id="sqlPolicyHelp">Run one read-only query using CARTA datasets (data.*). External sources and administrative commands are not supported.</p>
-        <label for="sqlQueryBox">Report SQL</label>
-        <div class="sql-editor-row">
-          <textarea id="sqlQueryBox" spellcheck="false" aria-describedby="sqlPolicyHelp"></textarea>
-          <button id="runCustomSqlBtn" class="btn btn-secondary" disabled>Run SQL</button>
-        </div>
       </details>
 
     </section>
