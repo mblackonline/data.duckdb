@@ -226,3 +226,7 @@ __marimo__/
 .netlify/
 .env.*
 node_modules/
+
+# Keep the Netlify backend source despite the generic Python lib/ rule.
+!netlify/lib/
+!netlify/lib/**
