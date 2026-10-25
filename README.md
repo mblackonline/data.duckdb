@@ -21,6 +21,10 @@ Open the [hosted explorer](https://carta-open-data-explorer-poc.netlify.app/).
 AI reporting requires Microsoft sign-in and staff authorization. Other reports
 remain public.
 
+To deploy for your organization, follow the [Entra setup](docs/entra-setup-runbook.md)
+and [Netlify deployment](docs/netlify-hosting.md) runbooks using your own tenant,
+application registrations, hosting project and Groq API key.
+
 Download report (CSV) exports the full matching report, preserving SQL limits.
 Search this page affects only the displayed page. See Download help for export
 limits and Excel guidance.

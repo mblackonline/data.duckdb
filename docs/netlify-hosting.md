@@ -11,8 +11,10 @@ Requires Node.js 22.12 or later, npm and access to the intended Netlify project.
 npm ci
 ```
 
-For a new environment, complete [Entra setup](entra-setup-runbook.md) and update
-`assets/staff-config.json`. Register the exact callback URLs in both Entra and
+For a new environment, complete [Entra setup](entra-setup-runbook.md) in your
+organization's chosen tenant. Replace the tenant, application, scope and callback
+settings in `assets/staff-config.json` with values for that environment. Use your
+own Netlify project and Groq API key. Register the exact callback URLs in both Entra and
 that file: `http://localhost:8000/auth-redirect.html` and
 `https://<YOUR_SITE_HOSTNAME>/auth-redirect.html`.
 

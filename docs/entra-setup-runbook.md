@@ -2,6 +2,8 @@
 
 Run each block in order in the same PowerShell window. Requires Azure CLI. Check the expected output before continuing.
 
+Use your organization's chosen Microsoft Entra tenant as the target tenant throughout this runbook. Create separate application registrations for each environment, using your own application names, user accounts and callback URLs. Each deployment uses a single tenant; external users join that tenant as guests.
+
 Use an Application Administrator or Cloud Application Administrator account authorized for this setup.
 
 ## 1. Sign in
@@ -10,7 +12,7 @@ Enter these values when prompted:
 
 | Prompt | What to enter |
 | --- | --- |
-| Target tenant ID | The tenant's GUID, a 36-character ID containing hyphens. Do not enter its display name. |
+| Target tenant ID | Your organization's chosen Entra tenant GUID, a 36-character ID containing hyphens. Do not enter its display name. |
 | Administrator sign-in email | Email used on Microsoft's sign-in screen. |
 
 If Azure CLI is already signed into the intended tenant, read its ID with `az account show --query tenantId --output tsv`. This shows the currently selected tenant only.
@@ -160,14 +162,16 @@ $WebSp | Select-Object displayName, appRoleAssignmentRequired
 
 Expected: the web name and False.
 
-## 8. Resolve and check the selected staff user
+## 8. Resolve and check the selected user
 
-Enter the staff user's sign-in name when prompted.
+For a guest, invite them into the target tenant and have them accept the invitation first. Use their object ID or guest user principal name from this tenant, not their home tenant.
+
+For each additional user, reuse the existing registrations and repeat steps 8 through 10 in the same PowerShell window. Invitation, API role assignment and individual consent are all required for guest AI access.
 
 ~~~powershell
 $Context = az account show --output json | ConvertFrom-Json
 if ($LASTEXITCODE -ne 0 -or $Context.tenantId -ne $TenantId) { throw 'Wrong tenant or context unavailable.' }
-$UserUpn = (Read-Host 'Approved ordinary staff user principal name').Trim()
+$UserUpn = (Read-Host 'Approved ordinary user principal name or tenant user object ID').Trim()
 $TestUser = az rest --method get --url ('https://graph.microsoft.com/v1.0/users/' + [uri]::EscapeDataString($UserUpn) + '?$select=id,accountEnabled') --output json | ConvertFrom-Json
 if ($LASTEXITCODE -ne 0 -or -not $TestUser.id -or $TestUser.accountEnabled -ne $true) { throw 'Selected user is missing or disabled.' }
 $UserRoles = az rest --method get --url ('https://graph.microsoft.com/v1.0/users/' + $TestUser.id + '/transitiveMemberOf/microsoft.graph.directoryRole?$count=true') --headers 'ConsistencyLevel=eventual' --output json | ConvertFrom-Json
@@ -195,27 +199,58 @@ if ($Assigned.Count -ne 1) { throw 'Expected one matching user assignment.' }
 
 ## 10. Grant consent for that user only
 
-Principal consent restricts this grant to the selected user.
+Run on your local Windows machine, signed into the target tenant selected in step 1. Confirm that `$TenantId`, the application registrations and the selected user all belong to that tenant before continuing.
+
+Use the direct Microsoft Graph requests below to create only the selected user's consent and verify that existing grants remain unchanged. Avoid `az ad app permission grant` for this procedure. Do not use the portal's **Grant admin consent** button, which grants tenant-wide consent.
+
+`clientId` and `resourceId` below are enterprise application (service principal) object IDs, not application/client IDs. An existing matching grant is left unchanged; unexpected scopes or tenant-wide consent stop the procedure for review. The administrator's CLI session needs Graph access to manage consent; do not add Graph permissions to the web or API registration.
 
 ~~~powershell
 if ((az account show --query tenantId --output tsv) -ne $TenantId) { throw 'Wrong tenant.' }
-$GrantList = az ad app permission list-grants --id $WebSp.id --output json | ConvertFrom-Json
-if ($LASTEXITCODE -ne 0) { throw 'Could not read existing consent.' }
-$ExistingGrants = @($GrantList | Where-Object { $null -ne $_ })
-if ($ExistingGrants.Count -gt 0) { throw 'Consent already exists. Review it before creating another grant.' }
-az ad app permission grant --id $WebSp.id --api $ApiSp.id --scope $ScopeName --consent-type Principal --principal-id $TestUser.id --output none
-if ($LASTEXITCODE -ne 0) { throw 'Consent grant failed.' }
-$GrantList = az ad app permission list-grants --id $WebSp.id --output json | ConvertFrom-Json
-if ($LASTEXITCODE -ne 0) { throw 'Consent readback failed.' }
-$Grants = @($GrantList | Where-Object { $null -ne $_ })
-if ($Grants.Count -ne 1) { throw 'Expected exactly one consent grant.' }
-$Grant = $Grants[0]
-if ($Grant.clientId -ne $WebSp.id -or $Grant.resourceId -ne $ApiSp.id -or $Grant.principalId -ne $TestUser.id -or
-    $Grant.consentType -ne 'Principal' -or $Grant.scope -cne $ScopeName) { throw 'Consent does not match the intended user, client, API and scope.' }
-[pscustomobject]@{ ConsentType = $Grant.consentType; Scope = $Grant.scope; OnlySelectedUser = $true }
+foreach ($Id in @($WebSp.id, $ApiSp.id, $TestUser.id)) { [void][guid]::Parse($Id) }
+function Get-WebConsentGrants {
+    $Filter = [uri]::EscapeDataString("clientId eq '$($WebSp.id)'")
+    $Url = 'https://graph.microsoft.com/v1.0/oauth2PermissionGrants?$filter=' + $Filter
+    do {
+        $Page = az rest --method get --url $Url --output json | ConvertFrom-Json
+        if ($LASTEXITCODE -ne 0 -or $null -eq $Page.value) { throw 'Could not read consent grants.' }
+        $Page.value | Select-Object id, clientId, resourceId, principalId, consentType, scope
+        $Url = $Page.'@odata.nextLink'
+    } while ($Url)
+}
+$Before = @(Get-WebConsentGrants)
+if (@($Before | Where-Object { $_.resourceId -eq $ApiSp.id -and $_.consentType -eq 'AllPrincipals' }).Count) {
+    throw 'Tenant-wide API consent exists. Review it before continuing.'
+}
+$Selected = @($Before | Where-Object { $_.clientId -eq $WebSp.id -and $_.resourceId -eq $ApiSp.id -and
+    $_.principalId -eq $TestUser.id -and $_.consentType -eq 'Principal' })
+if ($Selected.Count -gt 1 -or ($Selected.Count -eq 1 -and $Selected[0].scope -cne $ScopeName)) {
+    throw 'Unexpected consent for this user. Review the grant; do not replace it.'
+}
+if ($Selected.Count -eq 0) {
+    $Body = @{ clientId = $WebSp.id; resourceId = $ApiSp.id; principalId = $TestUser.id
+        consentType = 'Principal'; scope = $ScopeName } | ConvertTo-Json
+    $PayloadFile = Join-Path $env:TEMP ('entra-user-consent-' + [guid]::NewGuid() + '.json')
+    [IO.File]::WriteAllText($PayloadFile, $Body, [Text.UTF8Encoding]::new($false))
+    az rest --method post --url 'https://graph.microsoft.com/v1.0/oauth2PermissionGrants' --headers 'Content-Type=application/json' --body "@$PayloadFile" --output none
+    if ($LASTEXITCODE -ne 0) { throw 'Consent creation failed. Read existing grants before retrying.' }
+}
+$After = @(Get-WebConsentGrants)
+$Verified = @($After | Where-Object { $_.clientId -eq $WebSp.id -and $_.resourceId -eq $ApiSp.id -and
+    $_.principalId -eq $TestUser.id -and $_.consentType -eq 'Principal' -and $_.scope -ceq $ScopeName })
+if ($Verified.Count -ne 1 -or $After.Count -ne ($Before.Count + [int]($Selected.Count -eq 0))) {
+    throw 'Unexpected consent readback. Inspect all grants before continuing.'
+}
+foreach ($Previous in $Before) {
+    $Current = @($After | Where-Object { $_.id -eq $Previous.id })
+    if ($Current.Count -ne 1 -or ($Current[0] | ConvertTo-Json -Compress) -cne ($Previous | ConvertTo-Json -Compress)) {
+        throw 'An existing consent grant changed or disappeared. Inspect grants before continuing.'
+    }
+}
+[pscustomobject]@{ ConsentType = $Verified[0].consentType; Scope = $Verified[0].scope; ExistingGrantsPreserved = $true }
 ~~~
 
-Expected: Principal, Reports.Generate, True. On failure, inspect existing objects before retrying.
+Expected: Principal, Reports.Generate, True. Other users' grants remain present with the same IDs and values. Graph readbacks can lag; on failure, re-read grants before retrying a write. Do not continue onboarding until verification passes.
 
 ## 11. Save nonsecret configuration
 
@@ -247,5 +282,7 @@ For additional staff, create individual role assignments and Principal consent, 
 - [Application property updates](https://learn.microsoft.com/en-us/graph/api/application-update?view=graph-rest-1.0)
 - [User application-role assignment](https://learn.microsoft.com/en-us/graph/api/serviceprincipal-post-approleassignedto?view=graph-rest-1.0)
 - [Single-user consent](https://learn.microsoft.com/en-us/entra/identity/enterprise-apps/grant-consent-single-user)
+- [List delegated consent grants](https://learn.microsoft.com/en-us/graph/api/oauth2permissiongrant-list?view=graph-rest-1.0)
+- [Create a delegated consent grant](https://learn.microsoft.com/en-us/graph/api/oauth2permissiongrant-post?view=graph-rest-1.0)
 
 
