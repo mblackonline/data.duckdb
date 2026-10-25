@@ -84,7 +84,7 @@ node scripts/build-site.cjs
 After a successful build, **publish to the live site**:
 
 ```powershell
-npx --yes netlify-cli deploy --no-build --prod --context production --dir dist --functions netlify/functions
+npx --yes netlify-cli deploy --no-build --prod --dir dist --functions netlify/functions
 ```
 
 This uploads the built frontend and packages the function with its dependencies.
