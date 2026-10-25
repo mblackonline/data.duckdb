@@ -5,6 +5,7 @@ const fs = require("node:fs");
 const http = require("node:http");
 const path = require("node:path");
 const { createRequire } = require("node:module");
+const { securityHeaders } = require("./security-headers.cjs");
 
 assert(process.argv[2], "Provide a temporary npm prefix containing browser test dependencies.");
 const prefix = path.resolve(process.argv[2]);
@@ -80,6 +81,7 @@ const fixtureModule = `
 
 async function main() {
   const server = http.createServer((request, response) => {
+    for (const [name, value] of Object.entries(securityHeaders)) response.setHeader(name, value);
     const pathname = new URL(request.url, "http://localhost").pathname;
     if (pathname === '/assets/staff-config.json') {
       response.writeHead(200, {'Content-Type': 'application/json'});
@@ -99,6 +101,10 @@ async function main() {
     console.log("Browser:", await browser.version());
     const context = await browser.newContext({ viewport: { width: 1280, height: 900 }, serviceWorkers: "block" });
     const page = await context.newPage();
+    await page.addInitScript(() => {
+      globalThis.policyViolations = [];
+      document.addEventListener('securitypolicyviolation', event => globalThis.policyViolations.push(event.effectiveDirective));
+    });
     page.setDefaultTimeout(10000);
     const errors = [];
     page.on("pageerror", error => errors.push(error.message));
@@ -468,6 +474,35 @@ async function main() {
     assert.equal(await page.locator('#resultsTitle').textContent(), 'Bus routes');
     await audit('Signed out after canceling pending AI, with public report available');
     console.log('PASS: signed-out, unauthorized, authorization-loading, authorized and sign-out states; no key controls; backend-only requests; public reports preserved');
+    assert.deepEqual(await page.evaluate(() => globalThis.policyViolations), []);
+    await page.evaluate(() => {
+      const script = document.createElement('script');
+      script.textContent = 'globalThis.inlinePolicyBypass = true;';
+      document.body.appendChild(script);
+    });
+    await page.waitForFunction(() => policyViolations.includes('script-src-elem'));
+    assert.equal(await page.evaluate(() => globalThis.inlinePolicyBypass), undefined);
+    await page.evaluate(async () => { try { await fetch('https://blocked.example.invalid/policy-test'); } catch {} });
+    await page.waitForFunction(() => policyViolations.includes('connect-src'));
+    // Two loopback ports give distinct origins without mixed-content or local-network blocks.
+    const framingServer = http.createServer((_request, response) => {
+      response.writeHead(200, { 'Content-Type': 'text/html' });
+      response.end(`<iframe src="${origin}/" title="Framing test"></iframe>`);
+    });
+    await new Promise(resolve => framingServer.listen(0, '127.0.0.1', resolve));
+    const framingOrigin = `http://127.0.0.1:${framingServer.address().port}`;
+    await context.route(framingOrigin + '/**', route => route.continue());
+    const framing = await context.newPage();
+    try {
+      const refused = framing.waitForEvent('requestfailed', { predicate: request => request.url() === origin + '/' });
+      await framing.goto(framingOrigin);
+      const blockedFrame = await refused;
+      assert.match(blockedFrame.failure().errorText, /ERR_BLOCKED_BY_RESPONSE/);
+    } finally {
+      await framing.close();
+      await new Promise(resolve => framingServer.close(resolve));
+    }
+    console.log('PASS: enforced policy blocks injected inline JavaScript, unapproved fetch destinations, and framing from another origin');
     console.log("Manual screen-reader speech and browser zoom checks remain separate verification.");
   } finally {
     if (releaseAiResponse) releaseAiResponse();

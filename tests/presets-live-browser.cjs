@@ -6,6 +6,7 @@ const fs = require("node:fs");
 const http = require("node:http");
 const path = require("node:path");
 const { createRequire } = require("node:module");
+const { securityHeaders } = require("./security-headers.cjs");
 
 assert(process.argv[2], "Provide a temporary npm prefix containing playwright-core.");
 const requireTemp = createRequire(path.join(path.resolve(process.argv[2]), "verify.cjs"));
@@ -22,6 +23,7 @@ const files = new Map([
 
 async function main() {
   const server = http.createServer((request, response) => {
+    for (const [name, value] of Object.entries(securityHeaders)) response.setHeader(name, value);
     const file = files.get(new URL(request.url, "http://localhost").pathname);
     if (!file) { response.writeHead(404); response.end(); return; }
     let body = fs.readFileSync(path.join(root, file[0]), "utf8");

@@ -1,0 +1,9 @@
+# Keep Microsoft popup/redirect sign-in working. Do not add blanket COOP/COEP headers.
+# Inline styles support existing form/layout styles; inline JavaScript remains blocked.
+# The script hash permits only Netlify's current fixed badge iframe helper.
+/*
+  Content-Security-Policy: default-src 'none'; script-src 'self' 'wasm-unsafe-eval' 'sha256-BkKP2XO6WOEc3kXOiLr2ZoY83hamalKjPY9xBcbXVuw=' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' https://cdn.jsdelivr.net https://raw.githubusercontent.com https://gocarta.s3.us-east-2.amazonaws.com https://extensions.duckdb.org https://login.microsoftonline.com; worker-src 'self' blob:; frame-src 'self' https://login.microsoftonline.com; frame-ancestors 'self'; base-uri 'none'; object-src 'none'; form-action 'self' https://login.microsoftonline.com
+  X-Frame-Options: SAMEORIGIN
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: no-referrer
+  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=()

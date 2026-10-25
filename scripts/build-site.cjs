@@ -4,7 +4,7 @@ const path = require("node:path");
 const root = path.join(__dirname, "..");
 const output = path.join(root, "dist");
 const files = [
-  "index.html", "about.html", "auth-redirect.html", "assets/styles.css", "assets/app.js",
+  "index.html", "about.html", "auth-redirect.html", "_headers", "assets/styles.css", "assets/app.js",
   "assets/staff-auth.mjs", "assets/staff-config.json", "assets/auth-redirect.js"
 ];
 const vendorFiles = {
@@ -16,7 +16,7 @@ const publishFiles = [...files, ...Object.keys(vendorFiles)];
 
 // Refuse unexpected output instead of publishing or deleting stale files.
 for (const [folder, allowed] of [
-  [output, ["index.html", "about.html", "auth-redirect.html", "assets"]],
+  [output, ["index.html", "about.html", "auth-redirect.html", "_headers", "assets"]],
   [path.join(output, "assets"), publishFiles.filter(file => file.startsWith("assets/")).map(file => path.basename(file))]
 ]) {
   if (!fs.existsSync(folder)) continue;

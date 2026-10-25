@@ -84,10 +84,12 @@ node scripts/build-site.cjs
 After a successful build, **publish to the live site**:
 
 ```powershell
-npx --yes netlify-cli deploy --no-build --prod --dir dist --functions netlify/functions
+npx --yes netlify-cli deploy --no-build --prod --dir dist --functions netlify/functions --skip-functions-cache
 ```
 
 This uploads the built frontend and packages the function with its dependencies.
+The final flag forces fresh function packaging from source, bypassing any local
+function manifest cache. Keep using `netlify/functions` as the source directory.
 Do not add npm's `--offline` flag to deployment commands. Record the resulting
 deploy ID and log link in a separate release record.
 
@@ -106,12 +108,48 @@ Test at the primary HTTPS site URL, whose callback is registered in Entra:
 - AI requests go to `/.netlify/functions/report`, without exposing a provider key
   or calling Groq directly from the browser.
 - The callback loads without a URL rewrite or `Cross-Origin-Opener-Policy` header.
+- Static responses include the policy in [`_headers`](../_headers), including
+  Content-Security-Policy, X-Frame-Options, X-Content-Type-Options, Referrer-Policy,
+  and Permissions-Policy. The build copies this file into `dist` for Netlify.
 - `/docs/netlify-hosting.md`, `/.git/config`, `/package.json` and
   `/netlify/lib/report-api.mjs` return 404.
 
 With valid Entra settings, anonymous API GET/POST requests should return 401 and
 OPTIONS should return 405. A 503 is a readiness failure. Check function logs and
 variable configuration; do not share keys or authenticated request headers.
+
+To verify the active production backend without requesting an AI report, run
+from PowerShell in the project directory with the intended Netlify account and
+project linked:
+
+```powershell
+.\scripts\verify-deployed-backend.ps1
+```
+
+This packages the current backend into a new directory under `.netlify`, checks
+the package for the removed usage-store reference, and compares its SHA-256
+digest with the `report` function archive digest returned by the authenticated
+Netlify site API for `published_deploy`. It prints only deploy metadata and
+hashes, never environment values. It does not deploy, delete files, invoke Groq,
+or read stored usage records. The evidence JSON is retained in that directory.
+An exact match establishes that the active function uses that reviewed package.
+A mismatch can also result from different packaging tools, dependencies, runtime
+configuration, or source changes; investigate it rather than assuming the old
+backend is live. This check covers the active production deployment, not older
+deploy permalinks or historical stored records.
+
+The CSP permits the current jsDelivr-hosted DuckDB modules, its Blob worker and
+WebAssembly compilation, public catalog/Parquet/extension hosts, and Microsoft
+sign-in. Inline styles remain allowed for the existing layout; arbitrary inline
+JavaScript and JavaScript `eval` remain blocked. A hash allows only Netlify's
+current fixed badge iframe helper. If Netlify changes that helper, the browser
+will block the new helper until its contents are reviewed and the hash is
+updated. Core reports do not depend on that badge helper. Do not weaken the
+policy with `script-src 'unsafe-inline'` to accommodate a provider update.
+Same-origin framing is allowed for Microsoft callback compatibility; external
+framing is blocked. Keep COOP/COEP absent unless a separately tested sign-in
+change requires them. Custom static headers do not apply to function responses;
+the API separately returns `Cache-Control: no-store` and `nosniff`.
 
 ## 6. Roll back
 

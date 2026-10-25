@@ -6,14 +6,15 @@ const fs = require('node:fs');
 const http = require('node:http');
 const path = require('node:path');
 const { createRequire } = require('node:module');
+const { securityHeaders } = require('./security-headers.cjs');
 
 assert(process.argv[2], 'Provide a temporary npm prefix containing playwright-core.');
 const requireCheck = createRequire(path.join(path.resolve(process.argv[2]), 'verify.cjs'));
 const { chromium } = requireCheck('playwright-core');
 const root = path.join(__dirname, '..');
 const fixtureHtml = `<!doctype html><title>Session cache verification</title>
-<script src="/msal.js"></script><script type="module">
-import {createStaffSession} from '/staff-auth.mjs';
+<script src="/msal.js"></script><script type="module" src="/session-fixture.mjs"></script>`;
+const fixtureModule = `import {createStaffSession} from '/staff-auth.mjs';
 const tenantId = '11111111-1111-4111-8111-111111111111';
 const webClientId = '22222222-2222-4222-8222-222222222222';
 const apiScope = 'api://33333333-3333-4333-8333-333333333333/Reports.Generate';
@@ -51,11 +52,12 @@ try {
     redirectUris: [location.origin + '/auth-redirect.html']}, onState: state => fixture.states.push(state)});
   fixture.ready = true;
 } catch(error) {fixture.error = error.message;}
-</script>`;
+`;
 
 async function main() {
   let backendStatus = 200, probes = 0;
   const server = http.createServer((request, response) => {
+    for (const [name, value] of Object.entries(securityHeaders)) response.setHeader(name, value);
     const pathname = new URL(request.url, 'http://localhost').pathname;
     if (pathname === '/.netlify/functions/report') {
       probes++;
@@ -65,8 +67,8 @@ async function main() {
     }
     const file = pathname === '/msal.js' ? 'node_modules/@azure/msal-browser/lib/msal-browser.min.js'
       : pathname === '/staff-auth.mjs' ? 'assets/staff-auth.mjs' : null;
-    response.writeHead(pathname === '/' || file ? 200 : 404, {'Content-Type': file ? 'text/javascript' : 'text/html', 'Cache-Control': 'no-store'});
-    response.end(file ? fs.readFileSync(path.join(root, file)) : pathname === '/' ? fixtureHtml : 'Not found');
+    response.writeHead(pathname === '/' || pathname === '/session-fixture.mjs' || file ? 200 : 404, {'Content-Type': file || pathname === '/session-fixture.mjs' ? 'text/javascript' : 'text/html', 'Cache-Control': 'no-store'});
+    response.end(file ? fs.readFileSync(path.join(root, file)) : pathname === '/session-fixture.mjs' ? fixtureModule : pathname === '/' ? fixtureHtml : 'Not found');
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const origin = 'http://127.0.0.1:' + server.address().port;
