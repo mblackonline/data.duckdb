@@ -71,7 +71,7 @@ export async function createStaffSession({ config, onState, library = globalThis
       pca.setActiveAccount(null);
       publish(false, "Signing out...", true);
       try {
-        await pca.logoutPopup({ account: previous, postLogoutRedirectUri: `${origin}/` });
+        await pca.logoutPopup({ account: previous, postLogoutRedirectUri: redirectUri });
         publish(false);
       } catch {
         await pca.clearCache({ account: previous }).catch(() => {});
