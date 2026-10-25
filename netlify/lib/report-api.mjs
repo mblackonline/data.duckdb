@@ -1,19 +1,15 @@
-import { createHash, randomUUID } from "node:crypto";
 import { createRemoteJWKSet, jwtVerify } from "jose";
-import { getStore } from "@netlify/blobs";
 import defaults from "../ai-settings.json" with { type: "json" };
 import { messagesFor } from "./report-prompt.mjs";
 
 const MODELS = ["openai/gpt-oss-120b", "openai/gpt-oss-20b"];
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const REPORT_ID = /^\d{4}-\d{2}-\d{2}_[0-9a-f-]{36}$/;
-const hash = value => createHash("sha256").update(value).digest("hex");
 
 class ApiError extends Error {
-  constructor(status, code, message, retryAfter) {
+  constructor(status, code, message) {
     super(message);
-    Object.assign(this, { status, code, retryAfter });
+    Object.assign(this, { status, code });
   }
 }
 
@@ -56,40 +52,20 @@ function parseInput(text, settings) {
   let input;
   try { input = JSON.parse(text); } catch { throw new ApiError(400, "INVALID_REQUEST", "Send a valid JSON request."); }
   if (!input || Array.isArray(input) || typeof input !== "object" ||
-      Object.keys(input).some(key => !["question", "schema", "model", "reportId", "error"].includes(key)) ||
+      Object.keys(input).some(key => !["question", "schema", "model", "error"].includes(key)) ||
       typeof input.question !== "string" || !input.question.trim() || input.question.length > settings.questionCharacters ||
       typeof input.schema !== "string" || !input.schema.trim() || input.schema.length > 200000 ||
       !MODELS.includes(input.model) ||
-      (input.reportId !== undefined && (typeof input.reportId !== "string" || !REPORT_ID.test(input.reportId))) ||
-      (input.reportId === undefined && input.error !== undefined) ||
-      (input.reportId !== undefined && (typeof input.error !== "string" || !input.error.trim() || input.error.length > 16000))) {
+      (input.error !== undefined && (typeof input.error !== "string" || !input.error.trim() || input.error.length > 16000))) {
     throw new ApiError(400, "INVALID_REQUEST", "Check the question, schema, approved model and optional correction fields.");
   }
   return input;
-}
-
-// Each numbered slot is claimed once. Never use read-modify-write counters:
-// list() is only an optimization; onlyIfNew is the concurrency boundary.
-async function claimSlot(store, prefix, limit, value, retryAfter, signal) {
-  const { blobs } = await store.list({ prefix });
-  signal.throwIfAborted();
-  const used = new Set(blobs.map(blob => blob.key));
-  for (let slot = 0; slot < limit; slot++) {
-    signal.throwIfAborted();
-    const key = `${prefix}${slot}`;
-    if (used.has(key)) continue;
-    const result = await store.setJSON(key, value, { onlyIfNew: true });
-    signal.throwIfAborted();
-    if (result.modified === true) return;
-  }
-  throw new ApiError(429, "USAGE_LIMIT", "Your AI usage limit has been reached. Try again after the limit resets.", retryAfter);
 }
 
 export function createReportHandler({
   env = process.env,
   settings = defaults,
   fetchProvider = globalThis.fetch,
-  openStore = getStore,
   keySet,
   now = Date.now
 } = {}) {
@@ -149,38 +125,9 @@ export function createReportHandler({
       if (typeof apiKey !== "string" || !apiKey.trim() || /\s/.test(apiKey)) {
         throw new ApiError(503, "NOT_CONFIGURED", "AI reporting is not configured.");
       }
-      const store = openStore({
-        name: "carta-ai-usage-v1", consistency: "strong",
-        fetch: (url, options = {}) => fetch(url, {
-          ...options,
-          signal: AbortSignal.any([signal, ...(options.signal ? [options.signal] : []), AbortSignal.timeout(5000)])
-        })
-      });
-      const user = hash(`${tenant}:${claims.oid.toLowerCase()}`);
-      const contextHash = hash(JSON.stringify([input.question, input.schema, input.model]));
-      const day = new Date(now()).toISOString().slice(0, 10);
-      let reportId = input.reportId;
-      let permitKey;
-      if (reportId) {
-        permitKey = `reports/${user}/${reportId}`;
-        const permit = await store.get(permitKey, { type: "json" });
-        signal.throwIfAborted();
-        if (!permit || permit.contextHash !== contextHash || !Number.isFinite(permit.expiresAt) || permit.expiresAt <= now()) {
-          throw new ApiError(403, "INVALID_CORRECTION", "This report cannot be corrected. Submit a new question.");
-        }
-        const claimed = await store.setJSON(`${permitKey}/correction`, {}, { onlyIfNew: true });
-        if (claimed.modified !== true) throw new ApiError(409, "CORRECTION_USED", "This report has already used its SQL correction.");
-      } else {
-        reportId = `${day}_${randomUUID()}`;
-        permitKey = `reports/${user}/${reportId}`;
-        const untilTomorrow = Math.max(1, Math.ceil((Date.parse(`${day}T00:00:00Z`) + 86400000 - now()) / 1000));
-        await claimSlot(store, `questions/${user}/${day}/`, settings.questionsPerDay, {}, untilTomorrow, signal);
-      }
       const providerSignal = AbortSignal.any([signal, AbortSignal.timeout(settings.providerTimeoutMs)]);
       const candidates = [input.model, ...MODELS.filter(model => model !== input.model)];
       for (let index = 0; index < candidates.length; index++) {
-        const minute = Math.floor(now() / 60000);
-        await claimSlot(store, `calls/${user}/${minute}/`, settings.providerCallsPerMinute, {}, Math.max(1, 60 - Math.floor(now() / 1000) % 60), signal);
         providerSignal.throwIfAborted();
         let upstream;
         try {
@@ -209,24 +156,19 @@ export function createReportHandler({
           throw new ApiError(502, "INCOMPLETE_RESPONSE", "The AI provider did not return a complete report query.");
         }
         providerSignal.throwIfAborted();
-        if (!input.reportId) {
-          const saved = await store.setJSON(permitKey, { contextHash, expiresAt: now() + settings.correctionLifetimeMs }, { onlyIfNew: true });
-          if (saved.modified !== true) throw new Error("Could not save report permit.");
-        }
         signal.throwIfAborted();
-        return reply(200, { sql, model: candidates[index], reportId });
+        return reply(200, { sql, model: candidates[index] });
       }
     } catch (error) {
       if (error instanceof ApiError) {
         return reply(error.status, { error: error.code, message: error.message }, {
-          ...(error.status === 401 ? { "WWW-Authenticate": "Bearer" } : {}),
-          ...(error.retryAfter ? { "Retry-After": String(error.retryAfter) } : {})
+          ...(error.status === 401 ? { "WWW-Authenticate": "Bearer" } : {})
         });
       }
       if (signal.aborted || error.name === "TimeoutError" || error.name === "AbortError") {
         return reply(504, { error: "AI_TIMEOUT", message: "AI reporting timed out. Try again later." });
       }
-      // Do not log or echo tokens, prompts, provider bodies, storage keys or errors.
+      // Do not log or echo tokens, prompts, provider bodies or errors.
       return reply(503, { error: "AI_UNAVAILABLE", message: "AI reporting is temporarily unavailable." });
     }
   };

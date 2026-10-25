@@ -109,6 +109,22 @@
       padding: 0 1.5rem 3rem;
     }
 
+    .header-link { color: #ffffff; text-underline-offset: 0.2em; }
+    .header-link:focus-visible { outline-color: #ffffff; }
+    header .site-brand { margin: 0; font-size: 1.4rem; font-weight: 700; }
+    .site-footer { max-width: 1400px; margin: 0 auto; padding: 0 1.5rem 1.5rem; font-size: 0.9rem; }
+    .site-footer a { text-underline-offset: 0.2em; }
+    .skip-link { position: absolute; top: 0.5rem; left: 0.5rem; transform: translateY(-200%); padding: 0.65rem 1rem; background: #ffffff; color: var(--text); z-index: 10; }
+    .skip-link:focus { transform: none; }
+    .notice-page, .notice-footer { max-width: 58rem; }
+    .notice-card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: clamp(1rem, 4vw, 2rem); overflow-wrap: anywhere; }
+    .notice-card h1 { margin: 0; font-size: clamp(1.5rem, 4vw, 2rem); line-height: 1.25; }
+    .notice-card h2 { margin: 1.75rem 0 0.6rem; font-size: 1.15rem; line-height: 1.35; }
+    .notice-card p { margin: 0.75rem 0; }
+    .notice-card .notice-updated { margin-top: 0.5rem; font-size: 0.85rem; }
+    .notice-card a { text-underline-offset: 0.2em; }
+    .notice-warning { border-left: 4px solid var(--danger); padding: 0.75rem 1rem; background: #fef2f2; }
+
     /* Tabs */
     .tabs {
       display: flex;

@@ -114,7 +114,7 @@ async function main() {
         }
         aiRequests++;
         if (aiResponseGate) await aiResponseGate;
-        return route.fulfill({status: mode === 'revoked' ? 403 : 200, contentType: 'application/json', body: JSON.stringify({sql: 'SELECT * FROM data.simple_bus_routes', model: 'openai/gpt-oss-120b', reportId: 'fixture-report'})});
+        return route.fulfill({status: mode === 'revoked' ? 403 : 200, contentType: 'application/json', body: JSON.stringify({sql: 'SELECT * FROM data.simple_bus_routes', model: 'openai/gpt-oss-120b'})});
       }
       if (url.startsWith(origin + "/")) return route.continue();
       if (url.startsWith("https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@")) return route.fulfill({ contentType: "text/javascript", body: fixtureModule });

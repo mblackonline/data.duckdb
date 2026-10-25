@@ -1,10 +1,7 @@
 {
-  "questionsPerDay": 200,
-  "providerCallsPerMinute": 20,
   "requestBytes": 262144,
   "questionCharacters": 8000,
   "outputTokens": 4096,
   "providerTimeoutMs": 45000,
-  "requestTimeoutMs": 55000,
-  "correctionLifetimeMs": 900000
+  "requestTimeoutMs": 55000
 }

@@ -98,7 +98,7 @@ export async function createStaffSession({ config, onState, library = globalThis
       }
       if (response.status === 429) {
         const seconds = Number(response.headers.get("retry-after"));
-        throw new Error(`Your AI usage limit has been reached.${Number.isFinite(seconds) && seconds > 0 ? ` Try again in ${Math.ceil(seconds)} seconds.` : " Try again after the limit resets."}`);
+        throw new Error(`AI reporting is temporarily rate-limited.${Number.isFinite(seconds) && seconds > 0 ? ` Try again in ${Math.ceil(seconds)} seconds.` : " Try again later."}`);
       }
       if (!response.ok) throw new Error(response.status === 504 ? "AI reporting timed out. Try again later." : "AI reporting is temporarily unavailable. Try again later.");
       return response.json();

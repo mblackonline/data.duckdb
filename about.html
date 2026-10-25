@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="How the CARTA Open Data Explorer proof of concept handles public data, Microsoft sign-in, AI requests, and provider retention." />
+  <title>About, Data Use &amp; Acceptable Use | CARTA Open Data Explorer</title>
+  <link rel="stylesheet" href="./assets/styles.css" />
+</head>
+<body>
+  <a class="skip-link" href="#notice">Skip to content</a>
+  <header>
+    <div>
+      <p class="site-brand">CARTA Open Data Explorer</p>
+      <p>Proof of concept</p>
+    </div>
+    <a class="header-link" href="./index.html">Back to explorer</a>
+  </header>
+
+  <main class="notice-page" id="notice" tabindex="-1">
+    <article class="notice-card" aria-labelledby="notice-title">
+      <h1 id="notice-title">About, Data Use &amp; Acceptable Use</h1>
+      <p class="notice-updated">Last updated: <time datetime="2026-10-25">October 25, 2026</time></p>
+      <p>This proof of concept explores CARTA's public transportation data through reports, filters,
+        and an AI assistant. Public reports require no sign-in. AI features require Microsoft
+        sign-in and explicit authorization.</p>
+
+      <h2>Public reports and downloads</h2>
+      <p>Public report queries run in your browser using DuckDB and retrieve data from public sources.
+        CSV exports are downloaded to your device. Data sources and hosting services process the
+        network requests needed to provide this service.</p>
+
+      <h2>Microsoft sign-in and cookies</h2>
+      <p>Microsoft handles authentication. This application does not receive your Microsoft password.
+        It temporarily holds account information, including your display name and authentication
+        tokens, in browser memory. It sends an access token to its backend to verify your identity
+        and AI permissions.</p>
+      <p>Microsoft uses cookies on its sign-in domains to manage authentication and sign-in sessions.
+        Whether a session continues after you close your browser depends on your sign-in choices,
+        browser settings, and organizational policies.</p>
+      <p>Microsoft Entra stores account or guest-account information, access assignments, and consent
+        records. Its sign-in logs can include your account identifier, sign-in time, application,
+        outcome, IP address, approximate location, and browser or device information. Appropriately
+        authorized tenant administrators can access these records. Retention depends on the tenant's
+        licensing and logging configuration. Read Microsoft's information about
+        <a href="https://learn.microsoft.com/en-us/entra/identity/authentication/concept-authentication-web-browser-cookies">sign-in cookies</a>,
+        <a href="https://learn.microsoft.com/en-us/entra/identity/monitoring-health/concept-sign-in-log-activity-details">sign-in logs</a>, and
+        <a href="https://learn.microsoft.com/en-us/entra/identity/monitoring-health/reference-reports-data-retention">log retention</a>.</p>
+
+      <h2>AI requests and Groq</h2>
+      <p>AI requests pass through this site's backend to Groq, an external AI provider. The backend
+        uses the operator's server-held Groq API key, and usage is attributed to the operator's Groq
+        account. Your Microsoft password, sign-in token, and account identifier are not sent to Groq
+        for authentication or added to the AI prompt by the application.</p>
+      <p>Groq receives your question, selected table schemas, public dataset sample values, and other
+        available table names. If a query needs correction, database error text is also sent and can
+        include SQL or data values. Information you include in your question is shared with Groq.
+        Generated SQL runs in your browser.</p>
+      <p class="notice-warning"><strong>Do not submit passwords, API keys, personal information,
+        confidential material, or other sensitive information to the AI assistant.</strong></p>
+
+      <h2>Application storage and provider retention</h2>
+      <p>This version of the application does not create or update persistent user profiles,
+        user hashes, per-user quota counters, report-correction records, or AI activity history.
+        Account information, tokens, questions, and responses are processed temporarily to provide
+        the current session and requests. The application does not save them in a backend database
+        or application logs.</p>
+      <p>There are no application-enforced per-user daily or minute quotas. The browser attempts
+        one automatic SQL correction if a generated query fails. Provider and hosting limits still
+        apply. Any usage records created by an earlier version remain until the deployment operator
+        removes them.</p>
+      <p>Netlify provides hosting and backend processing. Provider operational records are governed
+        by their own policies and settings. Groq's handling of AI inputs and outputs depends on its
+        policies and the operator's data-retention settings. See
+        <a href="https://console.groq.com/docs/your-data">Groq's data-handling information</a>.</p>
+
+      <h2>Report limitations and acceptable use</h2>
+      <p>This service is experimental. Source data can be incomplete or delayed, and AI-generated
+        reports can contain errors. Verify results before relying on them. Refer to the original
+        data sources for licensing and reuse conditions.</p>
+      <p>Use the service lawfully. Do not bypass access controls or provider limits, disrupt the service,
+        or submit information you are not authorized to share. Access can be restricted for misuse.
+        Features and availability can change as the proof of concept develops.</p>
+
+      <h2>Contact</h2>
+      <p>For access questions, privacy concerns, or problem reports, contact the person who provided
+        you with this proof of concept or your organization's deployment administrator.</p>
+    </article>
+  </main>
+
+  <footer class="site-footer notice-footer">
+    <a href="./index.html">Back to explorer</a>
+  </footer>
+</body>
+</html>

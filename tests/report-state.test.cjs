@@ -302,6 +302,17 @@ test("current AI self-correction can still succeed", async () => {
   assert.equal(h.ui.aiStatusText.textContent, "Report ready.");
 });
 
+test("a failed SQL correction ends the browser request without another AI attempt", async () => {
+  const h = harness(); const ai = h.ask();
+  h.generations[0].resolve({ sql: "bad AI SQL", usedModel: "mock" }); await new Promise(setImmediate);
+  h.queries[0].reject(Error("binder error")); await new Promise(setImmediate);
+  h.generations[1].resolve({ sql: "bad correction SQL", usedModel: "mock" }); await new Promise(setImmediate);
+  h.queries[1].reject(Error("correction failed")); await ai;
+  assert.equal(h.generations.length, 2); assert.equal(h.queries.length, 2);
+  assert.match(h.ui.errorBanner.textContent, /correction failed/);
+  assert.equal(h.ui.askAiBtn.disabled, false);
+});
+
 test("an older AI completion cannot enable the button for a newer AI request", async () => {
   const h = harness(); const old = h.ask(); const current = h.ask();
   h.generations[0].resolve({ sql: "old", usedModel: "mock" }); await old;
@@ -476,7 +487,7 @@ test("backend requests send disclosed context and bind correction to the origina
   h.ui.getColumnsForView = async () => [{ name: "name", type: "VARCHAR" }];
   h.ui.mockConn.query = async () => result([{ name: "Public route sample" }]);
   h.ui.mockStaffSession.requestReport = async body => {
-    requests.push(body); return { sql: "SELECT * FROM data.simple_bus_routes", model: "openai/gpt-oss-20b", reportId: "test-report" };
+    requests.push(body); return { sql: "SELECT * FROM data.simple_bus_routes", model: "openai/gpt-oss-20b" };
   };
   vm.runInContext(section("    const sampleCache", "    function extractSql("), h.ui);
   const generated = await h.ui.generateSqlWithBackend("List CARTA routes");
@@ -487,7 +498,8 @@ test("backend requests send disclosed context and bind correction to the origina
   assert.match(requests[0].schema, /Public route sample/);
   assert.match(requests[0].schema, /Other available tables: data.simple_bus_stops/);
   assert.equal(requests[0].question, "List CARTA routes"); assert.equal(requests[0].error, undefined);
-  assert.equal(requests[1].error, "Unknown column"); assert.equal(requests[1].reportId, "test-report");
+  assert.equal(requests[1].error, "Unknown column");
+  assert.deepEqual(Object.keys(requests[1]).sort(), ["error", "model", "question", "schema"]);
   assert.equal(requests[1].model, "openai/gpt-oss-120b");
   assert.deepEqual(Object.keys(requests[0]).sort(), ["model", "question", "schema"]);
   assert.deepEqual(logs, []);

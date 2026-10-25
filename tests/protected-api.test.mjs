@@ -29,34 +29,15 @@ const validToken = await token();
 const input = { question: "Count CARTA routes", schema: 'Table data.simple_bus_routes: "route_id" (VARCHAR)', model: models[0] };
 const completion = () => Response.json({ choices: [{ message: { content: "SELECT COUNT(*) FROM data.simple_bus_routes" }, finish_reason: "stop" }] });
 
-function memoryStore({ staleLists = false } = {}) {
-  const records = new Map();
-  return {
-    records,
-    async list({ prefix }) { return { blobs: staleLists ? [] : [...records.keys()].filter(key => key.startsWith(prefix)).map(key => ({ key })) }; },
-    async get(key) { return records.get(key) ?? null; },
-    async setJSON(key, value, { onlyIfNew } = {}) {
-      if (onlyIfNew && records.has(key)) return { modified: false };
-      records.set(key, structuredClone(value));
-      return { modified: true };
-    }
-  };
-}
-
-function harness({ settings = {}, store = memoryStore(), provider = completion, env = {} } = {}) {
+function harness({ settings = {}, provider = completion, env = {} } = {}) {
   const calls = [];
-  const state = { time, storeOpens: 0, secretReads: 0 };
+  const state = { time, secretReads: 0 };
   const environment = { ENTRA_TENANT_ID: tenant, ENTRA_API_CLIENT_ID: audience, ENTRA_WEB_CLIENT_ID: client, ...env };
   Object.defineProperty(environment, "GROQ_API_KEY", {
     get() { state.secretReads++; return Object.hasOwn(env, "GROQ_API_KEY") ? env.GROQ_API_KEY : "fake-server-key"; }
   });
   const handler = createReportHandler({
     env: environment, settings: { ...defaults, ...settings }, keySet, now: () => state.time,
-    openStore(options) {
-      state.storeOpens++;
-      assert.equal(options.consistency, "strong");
-      return store;
-    },
     fetchProvider: async (url, options) => {
       assert.equal(url, "https://api.groq.com/openai/v1/chat/completions");
       assert.equal(options.redirect, "error");
@@ -71,13 +52,13 @@ function harness({ settings = {}, store = memoryStore(), provider = completion, 
       ...(signal ? { signal } : {})
     }));
   }
-  return { request, calls, state, store, environment };
+  return { request, calls, state, environment };
 }
 
-test("authorization probe validates access without reading the key or opening quota storage", async () => {
+test("authorization probe validates access without reading the provider key", async () => {
   const h = harness(); const response = await h.request(null, { method: "GET" });
   assert.equal(response.status, 200); assert.deepEqual(await response.json(), { authorized: true });
-  assert.equal(h.state.secretReads, 0); assert.equal(h.state.storeOpens, 0);
+  assert.equal(h.state.secretReads, 0);
   assert.equal(response.headers.get("cache-control"), "no-store");
   assert.equal(response.headers.get("access-control-allow-origin"), null);
 });
@@ -94,7 +75,7 @@ for (const [name, claims] of [
 ]) test(`denies ${name} before reading the key`, async () => {
   const h = harness(); const response = await h.request(input, { auth: await token(claims) });
   assert.equal(response.status, 401); assert.equal(h.calls.length, 0);
-  assert.equal(h.state.secretReads, 0); assert.equal(h.state.storeOpens, 0);
+  assert.equal(h.state.secretReads, 0);
 });
 
 for (const [name, claims] of [
@@ -130,26 +111,26 @@ test("missing identity configuration and disallowed methods fail closed", async 
 for (const model of models) test(`allows ${model} with fixed provider settings and safe output`, async () => {
   const h = harness(); const response = await h.request({ ...input, model });
   assert.equal(response.status, 200);
-  const result = await response.json(); assert.equal(result.model, model); assert.match(result.reportId, /^2026-10-24_/);
+  const result = await response.json(); assert.equal(result.model, model);
+  assert.deepEqual(Object.keys(result).sort(), ["model", "sql"]);
   assert.equal(h.calls[0].parsed.max_completion_tokens, 4096); assert.equal(h.calls[0].parsed.temperature, 0);
   assert.equal(h.calls[0].headers.Authorization, "Bearer fake-server-key");
   assert(!h.calls[0].body.includes("fake-server-key"));
   assert(h.calls[0].parsed.messages[0].content.includes("40001"));
   assert(h.calls[0].parsed.messages[0].content.includes(input.schema));
-  const records = JSON.stringify([...h.store.records]);
-  assert(!records.includes(input.question)); assert(!records.includes(input.schema));
-  assert(!records.includes(user)); assert(!records.includes("fake-server-key"));
+  assert(!h.calls[0].body.includes(user)); assert(!h.calls[0].body.includes(validToken));
   assert.equal(response.headers.get("cache-control"), "no-store");
 });
 
 test("rejects unsupported models, arbitrary URLs, provider options and malformed inputs", async () => {
   for (const body of [null, [], {}, { ...input, model: "unapproved" }, { ...input, url: "https://attacker.invalid" },
     { ...input, messages: [] }, { ...input, max_completion_tokens: 99999 }, { ...input, question: " " },
-    { ...input, question: "x".repeat(8001) }, { ...input, schema: "" }, { ...input, error: "unbound retry" },
-    { ...input, reportId: "../../other" }, { ...input, reportId: "2026-10-24_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa" }
+    { ...input, question: "x".repeat(8001) }, { ...input, schema: "" }, { ...input, schema: "x".repeat(200001) },
+    { ...input, error: " " }, { ...input, error: null }, { ...input, error: 1 }, { ...input, error: "x".repeat(16001) },
+    { ...input, reportId: "legacy-tracking-id" }
   ]) {
     const h = harness(); assert.equal((await h.request(body)).status, 400);
-    assert.equal(h.calls.length, 0); assert.equal(h.state.storeOpens, 0);
+    assert.equal(h.calls.length, 0);
   }
   const h = harness(); assert.equal((await h.request(null, { raw: "{" })).status, 400);
   assert.equal((await h.request(input, { headers: { "Content-Type": "text/plain" } })).status, 415);
@@ -158,116 +139,53 @@ test("rejects unsupported models, arbitrary URLs, provider options and malformed
 
 test("enforces actual byte size, including multibyte input without Content-Length", async () => {
   const h = harness(); const response = await h.request({ ...input, schema: "中".repeat(90000) });
-  assert.equal(response.status, 413); assert.equal(h.state.storeOpens, 0); assert.equal(h.calls.length, 0);
+  assert.equal(response.status, 413); assert.equal(h.calls.length, 0);
   assert.equal((await h.request(input, { headers: { "Content-Length": "262145" } })).status, 413);
   assert.equal((await harness().request({ ...input, question: "x".repeat(8000) })).status, 200);
 });
 
-test("missing key and quota-store errors cannot reach Groq", async () => {
+test("a missing provider key cannot reach Groq", async () => {
   const missing = harness({ env: { GROQ_API_KEY: "" } });
-  assert.equal((await missing.request()).status, 503); assert.equal(missing.calls.length, 0); assert.equal(missing.state.storeOpens, 0);
-  for (const failure of ["list", "setJSON"]) {
-    const store = memoryStore(); store[failure] = async () => { throw Error("private storage details"); };
-    const h = harness({ store }); const response = await h.request();
-    assert.equal(response.status, 503); assert(!JSON.stringify(await response.json()).includes("private storage details"));
-    assert.equal(h.calls.length, 0);
+  assert.equal((await missing.request()).status, 503); assert.equal(missing.calls.length, 0);
+});
+
+test("repeated AI requests need no storage transport and have no application user quota", async t => {
+  t.mock.method(globalThis, "fetch", () => { throw new Error("Unexpected storage or other network access"); });
+  const h = harness();
+  const responses = await Promise.all(Array.from({ length: 205 }, () => h.request()));
+  assert(responses.every(response => response.status === 200));
+  assert.equal(h.calls.length, 205);
+  for (const response of responses) {
+    assert.deepEqual(Object.keys(await response.json()).sort(), ["model", "sql"]);
   }
 });
 
-test("allows exactly 200 questions per user/day and starts a new allowance at UTC midnight", async () => {
-  const h = harness({ settings: { providerCallsPerMinute: 1000 } });
-  for (let index = 0; index < 200; index++) assert.equal((await h.request()).status, 200, `question ${index + 1}`);
-  const denied = await h.request(); assert.equal(denied.status, 429); assert.equal(h.calls.length, 200);
-  assert.equal(denied.headers.get("retry-after"), "43200");
-  assert.equal((await h.request(input, { auth: await token({ oid: otherUser }) })).status, 200);
-  h.state.time = Date.parse("2026-10-25T00:00:00Z");
-  assert.equal((await h.request()).status, 200);
-});
-
-test("daily quota survives concurrent requests and separate function instances, even with stale lists", async () => {
-  const store = memoryStore({ staleLists: true });
-  const options = { store, settings: { questionsPerDay: 4 } };
-  const a = harness(options), b = harness(options);
-  const responses = await Promise.all(Array.from({ length: 12 }, (_, index) => (index % 2 ? a : b).request()));
-  assert.equal(responses.filter(response => response.status === 200).length, 4);
-  assert.equal(responses.filter(response => response.status === 429).length, 8);
-  assert.equal(a.calls.length + b.calls.length, 4);
-});
-
-test("enforces 20 provider calls per UTC minute across instances", async () => {
-  const store = memoryStore(); const a = harness({ store }), b = harness({ store });
-  for (let index = 0; index < 20; index++) assert.equal((await (index % 2 ? a : b).request()).status, 200);
-  const denied = await b.request(); assert.equal(denied.status, 429); assert.equal(denied.headers.get("retry-after"), "60");
-  assert.equal(a.calls.length + b.calls.length, 20);
-  b.state.time += 60000; assert.equal((await b.request()).status, 200);
-});
-
-for (const status of [400, 404, 429]) test(`one model fallback on HTTP ${status} costs one daily question`, async () => {
+for (const status of [400, 404, 429]) test(`tries the other model once after provider HTTP ${status}`, async () => {
   const h = harness({ provider: (_url, _options, attempt) => attempt === 1 ? new Response("private error", { status }) : completion() });
   const response = await h.request(); assert.equal(response.status, 200); assert.equal((await response.json()).model, models[1]);
   assert.equal(h.calls.length, 2);
-  assert.equal([...h.store.records.keys()].filter(key => key.startsWith("questions/")).length, 1);
 });
 
-test("fallback and one SQL correction share one daily question with at most four provider calls", async () => {
+test("a correction can include provider fallback without a stored report permit", async () => {
   const h = harness({ provider: (_url, _options, attempt) => attempt % 2 ? new Response("limited", { status: 429 }) : completion() });
-  const first = await (await h.request()).json();
-  const correction = { ...input, reportId: first.reportId, error: "Unknown column" };
+  assert.equal((await h.request()).status, 200);
+  const correction = { ...input, error: "Unknown column" };
   assert.equal((await h.request(correction)).status, 200); assert.equal(h.calls.length, 4);
   assert(h.calls[2].parsed.messages[1].content.includes("Unknown column"));
-  assert.equal([...h.store.records.keys()].filter(key => key.startsWith("questions/")).length, 1);
-  assert.equal((await h.request(correction)).status, 409); assert.equal(h.calls.length, 4);
 });
 
-test("correction is bound to the original user, question, schema and preferred model", async () => {
-  const h = harness(); const first = await (await h.request()).json();
-  const correction = { ...input, reportId: first.reportId, error: "Unknown column" };
-  for (const body of [{ ...correction, question: "Another question" }, { ...correction, schema: "Another schema" }, { ...correction, model: models[1] }]) {
-    assert.equal((await h.request(body)).status, 403);
-  }
-  assert.equal((await h.request(correction, { auth: await token({ oid: otherUser }) })).status, 403);
-  assert.equal(h.calls.length, 1);
-  h.state.time += defaults.correctionLifetimeMs;
-  assert.equal((await h.request(correction)).status, 403); assert.equal(h.calls.length, 1);
-});
-
-test("concurrent correction requests cannot reuse a permit", async () => {
-  const store = memoryStore(); const a = harness({ store }), b = harness({ store });
-  const first = await (await a.request()).json();
-  const correction = { ...input, reportId: first.reportId, error: "Unknown column" };
-  const responses = await Promise.all([a.request(correction), b.request(correction)]);
-  assert.deepEqual(responses.map(response => response.status).sort(), [200, 409]);
-  assert.equal(a.calls.length + b.calls.length, 2);
-});
-
-test("correction remains available after the daily question allowance is exhausted", async () => {
-  const h = harness({ settings: { questionsPerDay: 1 } });
-  const first = await (await h.request()).json();
-  assert.equal((await h.request()).status, 429);
-  assert.equal((await h.request({ ...input, reportId: first.reportId, error: "Unknown column" })).status, 200);
-  assert.equal(h.calls.length, 2);
-});
-
-test("concurrent requests cannot exceed the minute allowance", async () => {
-  const store = memoryStore({ staleLists: true });
-  const settings = { providerCallsPerMinute: 3 };
-  const a = harness({ store, settings }), b = harness({ store, settings });
-  const responses = await Promise.all(Array.from({ length: 10 }, (_, index) => (index % 2 ? a : b).request()));
-  assert.equal(responses.filter(response => response.status === 200).length, 3);
+test("authorized corrections can be repeated across function instances without user tracking", async () => {
+  const a = harness(), b = harness();
+  const correction = { ...input, error: "Unknown column" };
+  const responses = await Promise.all([a.request(correction), a.request(correction), b.request(correction)]);
+  assert(responses.every(response => response.status === 200));
   assert.equal(a.calls.length + b.calls.length, 3);
-});
-
-test("failed or uncertain correction claims cannot call Groq", async () => {
-  const h = harness(); const first = await (await h.request()).json();
-  const originalSet = h.store.setJSON;
-  h.store.setJSON = async (key, ...args) => key.endsWith("/correction") ? { modified: false } : originalSet(key, ...args);
-  assert.equal((await h.request({ ...input, reportId: first.reportId, error: "Unknown column" })).status, 409);
-  assert.equal(h.calls.length, 1);
+  assert.equal((await b.request(correction, { auth: await token({ oid: otherUser }) })).status, 200);
 });
 
 test("every correction revalidates authorization, without cached role decisions", async () => {
-  const h = harness(); const first = await (await h.request()).json();
-  const response = await h.request({ ...input, reportId: first.reportId, error: "Unknown column" }, { auth: await token({ roles: [] }) });
+  const h = harness(); assert.equal((await h.request()).status, 200);
+  const response = await h.request({ ...input, error: "Unknown column" }, { auth: await token({ roles: [] }) });
   assert.equal(response.status, 403); assert.equal(h.calls.length, 1);
 });
 
@@ -287,7 +205,6 @@ test("rejects invalid, truncated and oversized provider responses", async () => 
     () => new Response("x".repeat(262145))]) {
     const h = harness({ provider }); assert.equal((await h.request()).status, 502);
     assert.equal(h.calls.length, 1);
-    assert(![...h.store.records.keys()].some(key => key.startsWith("reports/")));
   }
 });
 

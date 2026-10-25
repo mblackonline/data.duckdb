@@ -23,7 +23,7 @@ async function setup({ login, acquire, fetchRequest, logout } = {}) {
   }};
   const {createStaffSession} = await modulePromise;
   const session = await createStaffSession({ config, library, origin: 'http://localhost:8000', onState: state => states.push(state),
-    fetchRequest: async (url, request) => {requests.push({url, ...request}); return fetchRequest ? fetchRequest(url, request) : Response.json(request.method === 'POST' ? {sql: 'SELECT 1', model: 'openai/gpt-oss-120b', reportId: 'test-report'} : {authorized: true});}
+    fetchRequest: async (url, request) => {requests.push({url, ...request}); return fetchRequest ? fetchRequest(url, request) : Response.json(request.method === 'POST' ? {sql: 'SELECT 1', model: 'openai/gpt-oss-120b'} : {authorized: true});}
   });
   return {session, states, calls, requests, get options() {return options;}, get cacheClears() {return cacheClears;}};
 }
@@ -121,7 +121,7 @@ for (const status of [401, 403]) test('POST HTTP ' + status + ' removes authoriz
   await assert.rejects(h.session.requestReport({}), /not enabled/); assert.equal(h.requests.length, 2);
 });
 
-test('backend quota denial displays Retry-After and never starts a frontend fallback', async () => {
+test('hosting rate limit displays Retry-After and never starts a frontend fallback', async () => {
   const h = await setup({fetchRequest: (_url, options) => options.method === 'POST' ? Response.json({}, {status: 429, headers: {'Retry-After': '60'}}) : Response.json({authorized: true})});
   await h.session.signIn(); await assert.rejects(h.session.requestReport({}), /60 seconds/); assert.equal(h.requests.length, 2);
 });

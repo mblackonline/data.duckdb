@@ -114,9 +114,10 @@ In Netlify, open **Deploys**, select an available previous working successful
 deploy and choose **Publish Deploy**. Repeat verification. If automatic publishing
 is enabled, lock it while investigating.
 
-Rollback does not undo Entra changes or reset Blobs usage records. Check that the
-older deploy's environment values remain valid; applying new values requires a
-new deployment.
+Rollback does not undo Entra changes. Older versions can resume persistent usage
+tracking. Check that the older deploy's environment values remain valid; applying
+new values requires a new deployment. See [backend data handling](protected-ai-backend.md#request-limits-and-data-handling)
+for legacy usage records and cleanup.
 
 ## Further reference
 

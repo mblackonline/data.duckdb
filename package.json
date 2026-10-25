@@ -6,7 +6,6 @@
   },
   "dependencies": {
     "@azure/msal-browser": "5.26.0",
-    "@netlify/blobs": "11.1.6",
     "jose": "6.2.13"
   }
 }

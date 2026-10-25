@@ -101,7 +101,7 @@ test("initial and correction requests preserve schema time guidance and the orig
   const h = setup({ actualGenerator: true }); const calls = [];
   h.ui.mockConn.query = async () => table([{ scheduled_arrival_time: "19:35:57", predicted_arrival_time: "2026-08-18T19:51:00-04:00" }]);
   h.ui.mockStaffSession.requestReport = async body => {
-    calls.push(body); return { sql: 'SELECT "predicted_arrival_time" FROM data.gtfsrt_trip_updates_v1', model: "openai/gpt-oss-120b", reportId: "test-report" };
+    calls.push(body); return { sql: 'SELECT "predicted_arrival_time" FROM data.gtfsrt_trip_updates_v1', model: "openai/gpt-oss-120b" };
   };
   const first = await h.ui.generateSqlWithBackend("Show predicted arrival timestamps");
   await h.ui.generateSqlWithBackend("Show predicted arrival timestamps", "invalid timestamp", null, first.generation);
@@ -110,7 +110,8 @@ test("initial and correction requests preserve schema time guidance and the orig
     assert.match(call.schema, /2026-08-18T19:51:00-04:00/);
     assert.equal(call.question, "Show predicted arrival timestamps");
   }
-  assert.equal(calls[1].error, "invalid timestamp"); assert.equal(calls[1].reportId, "test-report");
+  assert.equal(calls[1].error, "invalid timestamp");
+  assert.deepEqual(Object.keys(calls[1]).sort(), ["error", "model", "question", "schema"]);
 });
 
 test("missing time context becomes an actionable message before SQL execution or another API attempt", async () => {
@@ -121,7 +122,7 @@ test("missing time context becomes an actionable message before SQL execution or
   }
   h.ui.aiQuestionInput.value = "Calculate arrival delay minutes from trip updates";
   const pending = h.ask(); await new Promise(setImmediate);
-  h.apiCalls[0].resolve({ sql: "MISSING_TIME_CONTEXT", model: "openai/gpt-oss-120b", reportId: "test-report" });
+  h.apiCalls[0].resolve({ sql: "MISSING_TIME_CONTEXT", model: "openai/gpt-oss-120b" });
   await pending;
   assert.equal(h.apiCalls.length, 1);
   assert.equal(h.queries.length, 0);

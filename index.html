@@ -20,6 +20,7 @@
           <button id="staffSignOutBtn" type="button" class="btn staff-auth-button" hidden>Sign out</button>
         </div>
         <p>AI reporting is available to authorized staff.</p>
+        <p><a class="header-link" href="./about.html">About, data use &amp; acceptable use</a></p>
         <p id="staffAuthStatus" role="status" aria-live="polite" aria-atomic="true"></p>
         <p id="legacyKeyStatus" role="status" aria-live="polite"></p>
       </div>
@@ -135,7 +136,7 @@
                 <p id="groqModelHelp">The other approved model may be tried after a rate limit or certain API errors.</p>
               </div>
             </div>
-            <p>Up to 200 submitted AI questions per person per UTC day. Automatic model fallback and one SQL correction are included.</p>
+            <p>The browser attempts one automatic SQL correction if a generated query fails. Provider and hosting limits apply.</p>
           </div>
         </details>
 
@@ -146,10 +147,12 @@
               datasets, and other available table names are sent to Groq (AI provider). If SQL fails, a retry also sends the DuckDB
               error, which may include SQL or data values. These requests pass through this site's protected backend.
               Generated SQL runs in your browser using DuckDB.</p>
-            <p>The Groq key stays on the server. Microsoft access tokens are sent only to this site's backend.
+            <p>The operator's Groq key stays on the server. Groq usage is attributed to the operator's account.
+              Microsoft access tokens are sent only to this site's backend, not to Groq.
               This application does not record keys or questions in application logs. Groq handles requests under its
               <a href="https://console.groq.com/docs/your-data" target="_blank" rel="noopener">data policies</a>
-              and the POC organization's retention settings.</p>
+              and the operator's retention settings. Read
+              <a href="./about.html">About, data use &amp; acceptable use</a> for Microsoft sign-in records, cookies, and data handling.</p>
           </div>
         </details>
       </div>
@@ -234,6 +237,10 @@
 
     </section>
   </main>
+
+  <footer class="site-footer">
+    <a href="./about.html">About, data use &amp; acceptable use</a>
+  </footer>
 
   <script defer src="./assets/msal-browser.min.js"></script>
   <script type="module" src="./assets/app.js"></script>

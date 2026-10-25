@@ -1460,16 +1460,14 @@ FROM parsed ORDER BY "trip_id";`;
         model: GROQ_MODELS.includes(groqModelSelect.value) ? groqModelSelect.value : GROQ_MODELS[0]
       };
       if (!isCurrent()) return null;
-      if (retryError && !context.reportId) throw new Error("This report cannot be corrected. Submit a new question.");
       const data = await staffSession.requestReport({
         question: context.question, schema: context.schema, model: context.model,
-        ...(retryError ? { reportId: context.reportId, error: retryError.slice(0, 16000) } : {})
+        ...(retryError ? { error: retryError.slice(0, 16000) } : {})
       }, signal);
       if (!isCurrent()) return null;
-      if (typeof data.sql !== "string" || typeof data.reportId !== "string" || !GROQ_MODELS.includes(data.model)) {
+      if (!data || typeof data.sql !== "string" || !GROQ_MODELS.includes(data.model)) {
         throw new Error("AI reporting returned an invalid response.");
       }
-      context.reportId = data.reportId;
       return { sql: extractSql(data.sql), usedModel: data.model, generation: context };
     }
 
