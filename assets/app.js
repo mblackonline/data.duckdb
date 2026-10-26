@@ -607,7 +607,10 @@
         const columns = schemaCache[view];
         if (sortCol && !columns.some(c => c.name === sortCol)) throw builderValidationError("Choose a sort column from this dataset.", builderSortCol);
         if (!["ASC", "DESC"].includes(sortDir)) throw builderValidationError("Choose an available sort direction.", builderSortDir);
-        let sql = `SELECT * FROM data."${view.replace(/"/g, '""')}"`;
+        // Match the presets: keep reporting fields, without large geometry payloads.
+        const projection = columns.filter(c => c.name.toLowerCase() !== "geometry")
+          .map(c => `"${c.name.replace(/"/g, '""')}"`).join(", ");
+        let sql = `SELECT ${projection} FROM data."${view.replace(/"/g, '""')}"`;
         if (col) {
           const column = columns.find(c => c.name === col);
           if (!column) throw builderValidationError("Choose a filter column from this dataset.", builderColumn);

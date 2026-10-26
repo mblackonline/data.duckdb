@@ -50,6 +50,17 @@ function harness(columns = [
 module.exports = { harness };
 
 if (require.main === module) {
+
+test("reports omit WKT and native geometry payloads while preserving every other column", async () => {
+  for (const type of ["VARCHAR", "GEOMETRY"]) {
+    const h = harness([
+      { name: "id", type: "VARCHAR" }, { name: 'display"name', type: "VARCHAR" },
+      { name: "geometry", type }, { name: "capacity", type: "INTEGER" }
+    ]);
+    await h.load(); await h.run();
+    assert.equal(h.reports[0].sql, 'SELECT "id", "display""name", "capacity" FROM data."stations";');
+  }
+});
 test("numeric-looking text stays quoted, including leading zeros and spaces", async () => {
   const h = harness(); await h.load(); h.choose("fee"); h.condition("="); h.value(" 001 "); await h.run();
   assert.match(h.reports[0].sql, /WHERE "fee" = ' 001 '/);
@@ -130,13 +141,13 @@ test("field changes reset values, update conditions, and disable unused controls
   assert.equal(h.ui.builderValue.value, ""); assert.equal(h.ui.builderOperator.value, "ILIKE_CONTAINS");
   assert.equal(h.ui.builderValue.disabled, false);
   h.choose(""); assert(h.ui.builderValue.disabled); await h.run();
-  assert.equal(h.reports[0].sql, 'SELECT * FROM data."stations";');
+  assert.equal(h.reports[0].sql, 'SELECT "fee", "capacity", "date", "active" FROM data."stations";');
 });
 
 test("identifier quotes, apostrophes, and LIKE wildcard characters remain literal", async () => {
   const h = harness([{ name: 'a"b', type: "VARCHAR" }]); await h.load(); h.choose('a"b');
   h.condition("ILIKE_CONTAINS"); h.value("O'Brien 50%_$"); await h.run();
-  assert.equal(h.reports[0].sql, `SELECT * FROM data."stations" WHERE "a""b" ILIKE '%O''Brien 50$%$_$$%' ESCAPE '$';`);
+  assert.equal(h.reports[0].sql, `SELECT "a""b" FROM data."stations" WHERE "a""b" ILIKE '%O''Brien 50$%$_$$%' ESCAPE '$';`);
   h.condition("="); await h.run(); assert.match(h.reports[1].sql, /'O''Brien 50%_\$'/);
   h.condition("ILIKE_STARTS"); h.value("A_"); await h.run(); assert.match(h.reports[2].sql, /ILIKE 'A\$_%' ESCAPE '\$'/);
 });

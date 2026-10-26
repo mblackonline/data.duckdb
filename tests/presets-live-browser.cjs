@@ -89,6 +89,18 @@ async function main() {
       }
       console.log(`PASS: ${preset.title}: ${snapshot.rows.length}/${reference.count} rows, ${snapshot.columns.length} columns, no truncation or report error`);
     }
+    await page.locator('#tab-builder').click();
+    await page.locator('#builderDataset').selectOption('simple_bus_routes');
+    await page.waitForFunction(() => !document.querySelector('#runBuilderBtn').disabled);
+    await page.locator('#runBuilderBtn').click();
+    await page.waitForFunction(() => presetCheck.snapshot.report || document.querySelector('#errorBanner').textContent.trim(), null, { timeout: 40000 });
+    const builtRoutes = await page.evaluate(() => presetCheck.snapshot);
+    assert(builtRoutes.report, await page.locator('#errorBanner').textContent());
+    assert.equal(builtRoutes.report.truncated, false);
+    assert.deepEqual(builtRoutes.columns, ['id', 'name', 'color']);
+    const expectedRoutes = await page.evaluate(async () => (await presetCheck.conn.query('SELECT id, name, color FROM data.simple_bus_routes ORDER BY id')).toArray().map(row => row.toJSON()));
+    assert.deepEqual(builtRoutes.rows, expectedRoutes);
+    console.log('PASS: Filter Builder returns every bus route reporting field and row without oversized geometry');
     assert.equal(await page.locator('#tab-ai').isVisible(), false);
     assert.equal(await page.locator('#groqApiKeyInput').count(), 0);
     console.log('PASS: Public reports require no sign-in; AI stays hidden while signed out');
