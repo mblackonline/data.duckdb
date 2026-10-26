@@ -2,8 +2,9 @@
     import * as duckdb from "https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.33.1-dev57.0/+esm";
     import { validateCartaSql as validateReportSql } from "./sql-policy.mjs";
 
-    // URL to attach data.duckdb from GitHub Raw (avoids the S3 .wal 403 error)
-    const REMOTE_DUCKDB_URL = "https://raw.githubusercontent.com/gocarta/data.duckdb/main/data.duckdb";
+    // Pin catalog definitions to a reviewed commit; S3 records can still refresh.
+    // GitHub Raw avoids the public S3 catalog's .wal 403 error.
+    const REMOTE_DUCKDB_URL = "https://raw.githubusercontent.com/gocarta/data.duckdb/6452b5028cc570c4c4079d8d3fa8bf46002f4b02/data.duckdb";
     const GROQ_MODELS = Object.freeze(["openai/gpt-oss-120b", "openai/gpt-oss-20b"]);
     // FTA agency identifier, verified against the NTD ID column in the public dataset.
     const CARTA_NTD_ID = "40001";

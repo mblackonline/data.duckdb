@@ -21,6 +21,13 @@ Open the [hosted explorer](https://carta-open-data-explorer-poc.netlify.app/).
 AI reporting requires Microsoft sign-in and staff authorization. Other reports
 remain public.
 
+The explorer uses the catalog at upstream commit
+[`6452b5028cc570c4c4079d8d3fa8bf46002f4b02`](https://github.com/gocarta/data.duckdb/commit/6452b5028cc570c4c4079d8d3fa8bf46002f4b02),
+configured by `REMOTE_DUCKDB_URL` in `assets/app.js`. This pins the dataset
+definitions and catalog format; records in the referenced S3 files can still
+refresh daily. See [updating the catalog pin](docs/netlify-hosting.md#updating-the-catalog-pin)
+when a newer catalog is needed.
+
 To deploy for your organization, follow the [Entra setup](docs/entra-setup-runbook.md)
 and [Netlify deployment](docs/netlify-hosting.md) runbooks using your own tenant,
 application registrations, hosting project and Groq API key.

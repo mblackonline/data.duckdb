@@ -142,6 +142,44 @@ tracking. Check that the older deploy's environment values remain valid; applyin
 new values requires a new deployment. See [backend data handling](protected-ai-backend.md#request-limits-and-data-handling)
 for legacy usage records and cleanup.
 
+## Updating the catalog pin
+
+The explorer attaches a specific upstream GitHub commit, rather than `main`, so
+catalog changes are tested before adoption. The current commit is recorded in
+the [README](../README.md#web-explorer); the actual URL is `REMOTE_DUCKDB_URL` in
+`assets/app.js`.
+
+Daily record refreshes at the existing S3 file URLs need no pin update. Update
+the pin when adopting reviewed catalog changes, such as a new dataset or a changed
+view definition. Pinning does not prevent changes to the S3 files themselves;
+coordinate changes to their paths, column names and types with the publisher.
+
+1. Choose a full commit SHA from `gocarta/data.duckdb` containing the intended
+   `data.duckdb`. Keep the previous URL available for rollback.
+2. Replace only the commit segment of `REMOTE_DUCKDB_URL` in `assets/app.js`,
+   using this URL format, and update the README's commit reference:
+
+   ```text
+   https://raw.githubusercontent.com/gocarta/data.duckdb/<FULL_COMMIT_SHA>/data.duckdb
+   ```
+
+3. Run the existing checks from the repository root:
+
+   ```powershell
+   npm test
+   npm run test:browser:live
+   ```
+
+   Confirm that the candidate catalog attaches with the application's pinned
+   DuckDB engine and that the required reports still work. Investigate failures
+   before adopting the pin; a live check can also fail because an underlying S3
+   dataset is unavailable or malformed. An incompatible catalog format requires
+   a separately reviewed engine update, not an automatic dependency upgrade.
+4. Commit and push the reviewed URL and README changes, then follow **4. Deploy**
+   and **5. Verify** above. Refresh the site after deployment.
+5. If the new catalog causes a regression, restore the previous URL and README
+   reference, then rebuild and redeploy, or use **6. Roll back** above.
+
 ## Further reference
 
 - [Backend configuration and limits](protected-ai-backend.md)
