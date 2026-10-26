@@ -515,14 +515,15 @@
         builderColumn.innerHTML = `<option value="">(No column filter)</option>`;
         builderSortCol.innerHTML = `<option value="">(Default order)</option>`;
         cols.forEach((c) => {
+          const displayType = /^GEOMETRY\b/i.test(c.type) ? "GEOMETRY" : c.type;
           const opt1 = document.createElement("option");
           opt1.value = c.name;
-          opt1.textContent = `${c.name} (${c.type})`;
+          opt1.textContent = `${c.name} (${displayType})`;
           builderColumn.appendChild(opt1);
 
           const opt2 = document.createElement("option");
           opt2.value = c.name;
-          opt2.textContent = `${c.name} (${c.type})`;
+          opt2.textContent = `${c.name} (${displayType})`;
           builderSortCol.appendChild(opt2);
         });
         builderReadyView = viewName;
