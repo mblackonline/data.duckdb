@@ -12,6 +12,7 @@ const files = new Map([
   ["/", ["index.html", "text/html"]],
   ["/assets/styles.css", ["assets/styles.css", "text/css"]],
   ["/assets/app.js", ["assets/app.js", "text/javascript"]],
+  ["/assets/sql-policy.mjs", ["assets/sql-policy.mjs", "text/javascript"]],
   ["/assets/staff-auth.mjs", ["assets/staff-auth.mjs", "text/javascript"]],
   ["/assets/staff-config.json", ["assets/staff-config.json", "application/json"]],
   ["/assets/msal-browser.min.js", ["node_modules/@azure/msal-browser/lib/msal-browser.min.js", "text/javascript"]]

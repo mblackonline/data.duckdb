@@ -3,7 +3,6 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
-const vm = require("node:vm");
 const { pathToFileURL } = require("node:url");
 const WebWorker = require("web-worker");
 const duckdb = require("@duckdb/duckdb-wasm");
@@ -78,8 +77,9 @@ const blocked = [
   ["non-SQL refusal", "UNSUPPORTED_QUERY"]
 ];
 
-let worker, db, parserConnection;
+let worker, db, parserConnection, validateCartaSql, validateCartaSqlAst;
 test.before(async () => {
+  ({ validateCartaSql, validateCartaSqlAst } = await import("../assets/sql-policy.mjs"));
   const version = JSON.parse(fs.readFileSync(path.join(dist, "..", "package.json"), "utf8")).version;
   assert(source.includes(`@duckdb/duckdb-wasm@${version}/`), "The policy check and app must use the same DuckDB-Wasm version.");
   const bundle = await duckdb.selectBundle({
@@ -100,55 +100,52 @@ test.after(async () => {
   }
 });
 let closes = 0, boundSql = null;
-const context = {
-  availableViews: views,
-  conn: { prepare: async sql => {
+const queryConnection = {
+  prepare: async sql => {
     assert.equal(sql, "SELECT json_serialize_sql(CAST(? AS VARCHAR)) AS ast");
     const statement = await parserConnection.prepare(sql);
     return {
       query: async value => { boundSql = value; return statement.query(value); },
       close: async () => { closes++; await statement.close(); }
     };
-  } }
+  }
 };
-vm.createContext(context);
-vm.runInContext(source.slice(source.indexOf("    async function validateCartaSql("), source.indexOf("    async function generateSqlWithBackend(")), context);
+const validate = sql => validateCartaSql(sql, queryConnection, views);
 
 for (const [name, sql] of allowed) test("allows " + name, async () => {
   const before = closes;
-  await context.validateCartaSql(sql);
+  await validate(sql);
   assert.equal(boundSql, sql); assert.equal(closes, before + 1);
 });
 for (const [name, sql] of blocked) test("blocks " + name, async () => {
-  await assert.rejects(context.validateCartaSql(sql));
+  await assert.rejects(validate(sql));
 });
 test("rejects unrecognized parser structures", () => {
-  assert.throws(() => context.validateCartaSqlAst({ statements: [{ node: { type: "UNKNOWN_NODE" } }] }, views));
+  assert.throws(() => validateCartaSqlAst({ statements: [{ node: { type: "UNKNOWN_NODE" } }] }, views));
 });
 test("accepts newer CTE serialization alongside the WebAssembly engine's format", async () => {
-  const ast = await context.validateCartaSql(allowed.find(([name]) => name === "CTE")[1]);
+  const ast = await validate(allowed.find(([name]) => name === "CTE")[1]);
   for (const entry of ast.statements[0].node.cte_map.map) {
     entry.value.query_node = entry.value.query.node;
     delete entry.value.query;
   }
-  context.validateCartaSqlAst(ast, views);
+  validateCartaSqlAst(ast, views);
 });
 test("accepts built-in main.date_part emitted by legacy EXTRACT parsing", async () => {
-  const ast = await context.validateCartaSql(allowed.find(([name]) => name === "date parsing and arithmetic")[1]);
+  const ast = await validate(allowed.find(([name]) => name === "date parsing and arithmetic")[1]);
   const expression = ast.statements[0].node.select_list[0];
   expression.schema = "main";
   delete expression.qualified_name;
-  context.validateCartaSqlAst(ast, views);
+  validateCartaSqlAst(ast, views);
 });
 test("accepts legacy constant type metadata without treating it as a query node", async () => {
-  const ast = await context.validateCartaSql(allowed.find(([name]) => name === "keywords and semicolons in values")[1]);
+  const ast = await validate(allowed.find(([name]) => name === "keywords and semicolons in values")[1]);
   ast.statements[0].node.select_list[0].value = { type: { id: "VARCHAR", type_info: null }, is_null: false, value: "text" };
-  context.validateCartaSqlAst(ast, views);
+  validateCartaSqlAst(ast, views);
 });
 test("parser failure fails closed and releases its statement", async () => {
-  const old = context.conn;
   let closed = false;
-  context.conn = { prepare: async () => ({ query: async () => { throw Error("parser unavailable"); }, close: async () => { closed = true; } }) };
-  try { await assert.rejects(context.validateCartaSql(allowed[0][1]), /parser unavailable/); assert(closed); }
-  finally { context.conn = old; }
+  const failingConnection = { prepare: async () => ({ query: async () => { throw Error("parser unavailable"); }, close: async () => { closed = true; } }) };
+  await assert.rejects(validateCartaSql(allowed[0][1], failingConnection, views), /parser unavailable/);
+  assert(closed);
 });

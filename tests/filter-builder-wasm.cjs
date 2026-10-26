@@ -28,6 +28,7 @@ async function main() {
         (3, '', 0, NULL, NULL), (4, NULL, NULL, NULL, NULL),
         (5, 'O''Brien 50%_$', 9007199254740993, '2026-10-25', true);`);
     const h = harness(); h.ui.conn = conn; h.ui.schemaCache = {};
+    h.ui.validateReportSql = (await import("../assets/sql-policy.mjs")).validateCartaSql;
     vm.runInContext(source.slice(source.indexOf("    async function validateCartaSql("), source.indexOf("    async function generateSqlWithBackend(")), h.ui);
     const executions = [];
     h.ui.executePagedQuery = sql => {

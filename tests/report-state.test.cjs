@@ -123,7 +123,7 @@ module.exports = { harness };
 
 if (require.main === module) {
 test("application JavaScript syntax is valid", () => {
-  new vm.Script(source.replace(/^\s*import .*;\s*$/m, ""));
+  new vm.Script(source.replace(/^\s*import .*;\s*$/gm, ""));
 });
 
 test("starting a report invalidates old rows and blocks filtering and export", async () => {

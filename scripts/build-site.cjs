@@ -5,7 +5,7 @@ const root = path.join(__dirname, "..");
 const output = path.join(root, "dist");
 const files = [
   "index.html", "about.html", "auth-redirect.html", "_headers", "assets/styles.css", "assets/app.js",
-  "assets/staff-auth.mjs", "assets/staff-config.json", "assets/auth-redirect.js"
+  "assets/staff-auth.mjs", "assets/staff-config.json", "assets/auth-redirect.js", "assets/sql-policy.mjs"
 ];
 const vendorFiles = {
   "assets/msal-browser.min.js": "node_modules/@azure/msal-browser/lib/msal-browser.min.js",

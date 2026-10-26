@@ -25,6 +25,7 @@ async function engine() {
   await conn.query("CREATE SCHEMA data; CREATE TABLE data.simple_bus_routes AS SELECT i AS route_id FROM range(10000) t(i);");
   const h = harness();
   Object.assign(h.ui, { actualDb: db, actualConn: conn, actualWorker: worker });
+  h.ui.validateReportSql = (await import("../assets/sql-policy.mjs")).validateCartaSql;
   vm.runInContext("db=actualDb;conn=actualConn;duckdbWorker=actualWorker;availableViews=['simple_bus_routes'];", h.ui);
   vm.runInContext(source.slice(source.indexOf("    async function validateCartaSql("), source.indexOf("    async function generateSqlWithBackend(")), h.ui);
   return { h, db, worker };

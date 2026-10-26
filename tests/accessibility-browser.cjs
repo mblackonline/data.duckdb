@@ -15,6 +15,7 @@ const staticFiles = new Map([
   ["/", { type: "text/html; charset=utf-8", body: fs.readFileSync(path.join(root, "index.html")) }],
   ["/assets/styles.css", { type: "text/css; charset=utf-8", body: fs.readFileSync(path.join(root, "assets", "styles.css")) }],
   ["/assets/app.js", { type: "text/javascript; charset=utf-8", body: fs.readFileSync(path.join(root, "assets", "app.js")) }],
+  ["/assets/sql-policy.mjs", { type: "text/javascript", body: fs.readFileSync(path.join(root, "assets/sql-policy.mjs")) }],
   ["/assets/staff-auth.mjs", { type: "text/javascript", body: fs.readFileSync(path.join(root, "assets/staff-auth.mjs")) }],
   ["/assets/msal-browser.min.js", { type: "text/javascript", body: `
     globalThis.fixtureAuthMode = 'authorized';
