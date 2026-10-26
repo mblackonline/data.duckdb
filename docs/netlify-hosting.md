@@ -118,26 +118,6 @@ With valid Entra settings, anonymous API GET/POST requests should return 401 and
 OPTIONS should return 405. A 503 is a readiness failure. Check function logs and
 variable configuration; do not share keys or authenticated request headers.
 
-To verify the active production backend without requesting an AI report, run
-from PowerShell in the project directory with the intended Netlify account and
-project linked:
-
-```powershell
-.\scripts\verify-deployed-backend.ps1
-```
-
-This packages the current backend into a new directory under `.netlify`, checks
-the package for the removed usage-store reference, and compares its SHA-256
-digest with the `report` function archive digest returned by the authenticated
-Netlify site API for `published_deploy`. It prints only deploy metadata and
-hashes, never environment values. It does not deploy, delete files, invoke Groq,
-or read stored usage records. The evidence JSON is retained in that directory.
-An exact match establishes that the active function uses that reviewed package.
-A mismatch can also result from different packaging tools, dependencies, runtime
-configuration, or source changes; investigate it rather than assuming the old
-backend is live. This check covers the active production deployment, not older
-deploy permalinks or historical stored records.
-
 The CSP permits the current jsDelivr-hosted DuckDB modules, its Blob worker and
 WebAssembly compilation, public catalog/Parquet/extension hosts, and Microsoft
 sign-in. Inline styles remain allowed for the existing layout; arbitrary inline
