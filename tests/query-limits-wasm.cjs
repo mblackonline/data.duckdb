@@ -1,28 +1,24 @@
-// Optional real-worker smoke test. The argument is a temporary npm prefix containing
-// @duckdb/duckdb-wasm and web-worker, with no additional application dependencies.
+// Optional real-worker smoke test using the project's pinned development dependencies.
+// Usage: node tests/query-limits-wasm.cjs
 const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
 const assert = require("node:assert/strict");
-const { createRequire } = require("node:module");
 const { pathToFileURL } = require("node:url");
 const { harness } = require("./report-state.test.cjs");
 
-if (!process.argv[2]) throw Error("Usage: node tests/query-limits-wasm.cjs <temporary npm prefix>");
-const prefix = path.resolve(process.argv[2]);
-const requireTemp = createRequire(path.join(prefix, "verify.cjs"));
-const WebWorkerClass = requireTemp("web-worker");
-const pkg = path.join(prefix, "node_modules", "@duckdb", "duckdb-wasm");
-const duckdb = require(path.join(pkg, "dist", "duckdb-node.cjs"));
+const WebWorkerClass = require("web-worker");
+const duckdb = require("@duckdb/duckdb-wasm");
+const dist = path.dirname(require.resolve("@duckdb/duckdb-wasm"));
 const source = fs.readFileSync(path.join(__dirname, "..", "assets", "app.js"), "utf8");
 const engines = [];
 
 async function engine() {
   // Module loading avoids the adapter's classic importScripts Windows-path handling.
-  const worker = new WebWorkerClass(pathToFileURL(path.join(pkg, "dist", "duckdb-node-mvp.worker.cjs")), { type: "module" });
+  const worker = new WebWorkerClass(pathToFileURL(path.join(dist, "duckdb-node-mvp.worker.cjs")), { type: "module" });
   const db = new duckdb.AsyncDuckDB(new duckdb.VoidLogger(), worker);
   engines.push({ db, worker });
-  await db.instantiate(path.join(pkg, "dist", "duckdb-mvp.wasm"));
+  await db.instantiate(path.join(dist, "duckdb-mvp.wasm"));
   await db.open({ path: ":memory:", maximumThreads: 1, query: { queryPollingInterval: 10, castBigIntToDouble: true, castDecimalToDouble: true, castTimestampToDate: true } });
   const conn = await db.connect();
   await conn.query("SET memory_limit='256MB'");

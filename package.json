@@ -4,8 +4,21 @@
   "engines": {
     "node": ">=22.12.0"
   },
+  "scripts": {
+    "test": "node --test --test-reporter=dot tests/filter-builder.test.cjs tests/report-state.test.cjs tests/pagination.test.cjs tests/ai-report.test.cjs tests/api-key.test.cjs tests/csv-export.test.cjs tests/full-csv.test.cjs tests/sql-policy.test.cjs tests/protected-api.test.mjs",
+    "test:browser:install": "playwright install chromium",
+    "test:browser": "node tests/accessibility-browser.cjs && node tests/staff-session-browser.cjs",
+    "test:browser:live": "node tests/presets-live-browser.cjs && node tests/ai-times-browser.cjs && node tests/full-csv-browser.cjs",
+    "test:wasm": "node tests/filter-builder-wasm.cjs && node tests/query-limits-wasm.cjs"
+  },
   "dependencies": {
     "@azure/msal-browser": "5.26.0",
     "jose": "6.2.13"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "4.14.0",
+    "@duckdb/duckdb-wasm": "1.33.1-dev57.0",
+    "playwright": "1.64.1",
+    "web-worker": "1.5.0"
   }
 }

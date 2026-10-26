@@ -1,16 +1,13 @@
 // Offline browser integration check using the installed MSAL cache implementation.
-// Usage: node tests/staff-session-browser.cjs <temporary npm prefix with playwright-core>
+// Usage: node tests/staff-session-browser.cjs
 // Only interactive Microsoft login/logout are replaced by fixture token hydration/cache clearing.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const http = require('node:http');
 const path = require('node:path');
-const { createRequire } = require('node:module');
+const { chromium } = require('playwright');
 const { securityHeaders } = require('./security-headers.cjs');
 
-assert(process.argv[2], 'Provide a temporary npm prefix containing playwright-core.');
-const requireCheck = createRequire(path.join(path.resolve(process.argv[2]), 'verify.cjs'));
-const { chromium } = requireCheck('playwright-core');
 const root = path.join(__dirname, '..');
 const fixtureHtml = `<!doctype html><title>Session cache verification</title>
 <script src="/msal.js"></script><script type="module" src="/session-fixture.mjs"></script>`;
@@ -74,7 +71,7 @@ async function main() {
   const origin = 'http://127.0.0.1:' + server.address().port;
   let browser;
   try {
-    browser = await chromium.launch({executablePath: 'C:/Program Files/Google/Chrome/Application/chrome.exe', headless: true});
+    browser = await chromium.launch({headless: true});
     const context = await browser.newContext();
     await context.route('**/*', route => route.request().url().startsWith(origin + '/') ? route.continue() : route.abort());
     const page = await context.newPage();

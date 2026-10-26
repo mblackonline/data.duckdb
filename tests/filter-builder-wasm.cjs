@@ -1,28 +1,24 @@
 // Offline integration check using the same DuckDB-Wasm version as the application.
-// Usage: node tests/filter-builder-wasm.cjs <temporary npm prefix with @duckdb/duckdb-wasm and web-worker>
+// Usage: node tests/filter-builder-wasm.cjs
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
-const { createRequire } = require("node:module");
 const { pathToFileURL } = require("node:url");
 const { harness } = require("./filter-builder.test.cjs");
 
-assert(process.argv[2], "Provide a temporary npm prefix containing Wasm test dependencies.");
-const prefix = path.resolve(process.argv[2]);
-const requireTemp = createRequire(path.join(prefix, "verify.cjs"));
-const WebWorker = requireTemp("web-worker");
-const pkg = path.join(prefix, "node_modules/@duckdb/duckdb-wasm");
-const duckdb = require(path.join(pkg, "dist/duckdb-node.cjs"));
+const WebWorker = require("web-worker");
+const duckdb = require("@duckdb/duckdb-wasm");
+const dist = path.dirname(require.resolve("@duckdb/duckdb-wasm"));
 const source = fs.readFileSync(path.join(__dirname, "../assets/app.js"), "utf8");
 
 async function main() {
-  const worker = new WebWorker(pathToFileURL(path.join(pkg, "dist/duckdb-node-mvp.worker.cjs")), { type: "module" });
+  const worker = new WebWorker(pathToFileURL(path.join(dist, "duckdb-node-mvp.worker.cjs")), { type: "module" });
   const db = new duckdb.AsyncDuckDB(new duckdb.VoidLogger(), worker);
   const deadline = setTimeout(() => { worker.terminate(); console.error("Builder Wasm verification timed out."); process.exit(1); }, 30000);
   let conn;
   try {
-    await db.instantiate(path.join(pkg, "dist/duckdb-mvp.wasm"));
+    await db.instantiate(path.join(dist, "duckdb-mvp.wasm"));
     await db.open({ path: ":memory:", maximumThreads: 1 });
     conn = await db.connect();
     await conn.query(`CREATE SCHEMA data;

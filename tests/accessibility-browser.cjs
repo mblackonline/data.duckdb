@@ -1,19 +1,15 @@
-// Optional real-browser check. Usage: node tests/accessibility-browser.cjs <temporary npm prefix> [browser.exe] [--baseline]
-// The temporary prefix needs playwright-core and @axe-core/playwright. All remote requests are mocked or blocked.
+// Optional real-browser check. Usage: node tests/accessibility-browser.cjs [--baseline]
+// Uses the project's Playwright-managed Chromium. All remote requests are mocked or blocked.
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const http = require("node:http");
 const path = require("node:path");
-const { createRequire } = require("node:module");
+const { chromium } = require("playwright");
+const AxeBuilder = require("@axe-core/playwright").default;
 const { securityHeaders } = require("./security-headers.cjs");
 
-assert(process.argv[2], "Provide a temporary npm prefix containing browser test dependencies.");
-const prefix = path.resolve(process.argv[2]);
 const output = path.join(__dirname, "..", ".netlify", "frontend-verification");
 fs.mkdirSync(output, {recursive: true});
-const requireTemp = createRequire(path.join(prefix, "verify.cjs"));
-const { chromium } = requireTemp("playwright-core");
-const AxeBuilder = requireTemp("@axe-core/playwright").default;
 const root = path.join(__dirname, "..");
 const staticFiles = new Map([
   ["/", { type: "text/html; charset=utf-8", body: fs.readFileSync(path.join(root, "index.html")) }],
@@ -31,11 +27,6 @@ const staticFiles = new Map([
   ["/mock-worker.js", { type: "text/javascript; charset=utf-8", body: "" }]
 ]);
 const baseline = process.argv.includes("--baseline");
-const executablePath = process.argv.slice(3).find(value => /\.exe$/i.test(value)) || [
-  "C:/Program Files/Google/Chrome/Application/chrome.exe",
-  "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe"
-].find(value => fs.existsSync(value));
-assert(executablePath, "Provide the path to an installed Chromium browser.");
 
 // This fixture tests UI behavior; real SQL parsing and execution are covered by the separate policy/Wasm checks.
 const fixtureModule = `
@@ -97,7 +88,7 @@ async function main() {
   const origin = `http://127.0.0.1:${server.address().port}`;
   let browser, releaseAiResponse;
   try {
-    browser = await chromium.launch({ executablePath, headless: true });
+    browser = await chromium.launch({ headless: true });
     console.log("Browser:", await browser.version());
     const context = await browser.newContext({ viewport: { width: 1280, height: 900 }, serviceWorkers: "block" });
     const page = await context.newPage();

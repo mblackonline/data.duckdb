@@ -110,9 +110,9 @@ node --test --test-reporter=spec tests/protected-api.test.mjs
 These tests use fixture tokens and mocked provider responses. Use the
 [deployment checks](netlify-hosting.md#5-verify) to verify a live environment.
 
-For an offline browser cache check, run
-`node tests/staff-session-browser.cjs C:\path\to\temporary-test-dependencies`,
-where the temporary prefix contains `playwright-core` and Chrome is installed.
+For an offline browser cache check, follow the [development setup](../README.md#development-checks),
+then run `node tests/staff-session-browser.cjs`. The check uses the project's
+locked Playwright dependency and its managed Chromium, without a browser path.
 It uses the installed MSAL library with fake authentication tokens to check
 same-tab refresh, a separate tab, backend denial, and cache clearing on sign-out.
 External network requests are blocked; it does not test a real Microsoft login.

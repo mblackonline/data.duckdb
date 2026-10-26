@@ -1,16 +1,13 @@
 // Optional read-only integration check against the public CDN/catalog/Parquet.
-// Usage: node tests/presets-live-browser.cjs <temporary npm prefix with playwright-core>
-// Requires installed Chrome and network access. No API key or AI requests are used.
+// Usage: node tests/presets-live-browser.cjs
+// Requires Playwright-managed Chromium and network access. No API key or AI requests are used.
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const http = require("node:http");
 const path = require("node:path");
-const { createRequire } = require("node:module");
+const { chromium } = require("playwright");
 const { securityHeaders } = require("./security-headers.cjs");
 
-assert(process.argv[2], "Provide a temporary npm prefix containing playwright-core.");
-const requireTemp = createRequire(path.join(path.resolve(process.argv[2]), "verify.cjs"));
-const { chromium } = requireTemp("playwright-core");
 const root = path.join(__dirname, "..");
 const files = new Map([
   ["/", ["index.html", "text/html"]],
@@ -39,7 +36,7 @@ async function main() {
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   let browser;
   try {
-    browser = await chromium.launch({ executablePath: "C:/Program Files/Google/Chrome/Application/chrome.exe", headless: true });
+    browser = await chromium.launch({ headless: true });
     const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
     const errors = [];
     page.on("pageerror", error => errors.push(error.message));
@@ -47,7 +44,7 @@ async function main() {
     await page.goto(`http://127.0.0.1:${server.address().port}`);
     await page.waitForFunction(() => globalThis.presetCheck?.conn && document.querySelector("#dbStatusText").textContent.includes("Connected"), null, { timeout: 60000 });
     // Page-size controls appear only after a report needs multiple pages.
-    await page.getByRole("button", { name: "Bus stops", exact: true }).click();
+    await page.getByRole("button", { name: /^View bus stops\b/ }).click();
     await page.waitForFunction(() => presetCheck.snapshot.report?.title === "CARTA Bus Stops");
     await page.locator("#rowsPerPage").selectOption("1000");
     await page.waitForFunction(() => presetCheck.snapshot.report?.page.size === 1000);

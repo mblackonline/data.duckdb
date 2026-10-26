@@ -1,14 +1,12 @@
-// Real Chrome/DuckDB timestamp integration, using an isolated in-memory fixture.
-// Usage: node tests/ai-times-browser.cjs <temporary playwright-core prefix> [--live-ai]
+// Real Chromium/DuckDB timestamp integration, using an isolated in-memory fixture.
+// Usage: node tests/ai-times-browser.cjs
 // Live AI is verified through the protected application in the approved deployment checkpoint.
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const http = require("node:http");
 const path = require("node:path");
-const { createRequire } = require("node:module");
+const { chromium } = require("playwright");
 const fixtureSql = require("./fixtures/trip-times.cjs");
-assert(process.argv[2], "Provide a temporary prefix containing playwright-core.");
-const { chromium } = createRequire(path.join(path.resolve(process.argv[2]), "verify.cjs"))("playwright-core");
 assert(!process.argv.includes('--live-ai'), 'Use the protected application for separately approved live AI verification.');
 const root = path.join(__dirname, "..");
 const files = new Map([
@@ -44,7 +42,7 @@ async function main() {
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   let browser;
   try {
-    browser = await chromium.launch({ executablePath: "C:/Program Files/Google/Chrome/Application/chrome.exe", headless: true });
+    browser = await chromium.launch({ headless: true });
     const page = await browser.newPage(); const errors = []; let apiCalls = 0;
     page.on("pageerror", error => errors.push(error.message));
     await page.route('https://api.groq.com/**', route => {apiCalls++; return route.abort();});

@@ -29,11 +29,35 @@ Download report (CSV) exports the full matching report, preserving SQL limits.
 Search this page affects only the displayed page. See Download help for export
 limits and Excel guidance.
 
-Run the regression checks with Node.js:
+## Development checks
 
-```powershell
-node --test --test-reporter=dot tests/filter-builder.test.cjs tests/report-state.test.cjs tests/pagination.test.cjs tests/ai-report.test.cjs tests/api-key.test.cjs tests/csv-export.test.cjs tests/full-csv.test.cjs tests/sql-policy.test.cjs tests/protected-api.test.mjs
+Use Node.js 22.12 or later and npm. The regression and CSV checks also require
+Python 3 (`python` on PATH) and [uv](https://docs.astral.sh/uv/getting-started/installation/).
+Run these commands from the repository root on Windows, macOS or Linux:
+
+```sh
+npm ci
+npm run test:browser:install
 ```
+
+Browser checks use Playwright's managed Chromium, with the matching version
+selected by the lockfile. No system Chrome installation, browser executable path,
+or temporary dependency folder is required. On Linux, the browser also needs the
+system libraries listed in [Playwright's browser setup](https://playwright.dev/docs/browsers#install-system-dependencies).
+Browser installation needs network access; repeat it after upgrading Playwright.
+
+| Command | Checks | Network access |
+| --- | --- | --- |
+| `npm test` | Existing regression suite | First run may download the Python SQL-parser dependency |
+| `npm run test:browser` | Accessibility/UI and Microsoft session-cache fixtures | None after setup; external requests are mocked or blocked |
+| `npm run test:wasm` | Filter builder and query limits in the pinned Wasm engine | None after setup |
+| `npm run test:browser:live` | Public reports, timestamp calculations and full CSV exports | Public CDN, catalog and dataset access |
+
+None of these checks requests a live AI report. The session checks simulate
+interactive Microsoft sign-in/out; verify the real popup separately when changing
+authentication behavior. Individual checks can also be run with
+`node tests/<check-name>.cjs`, without dependency-path arguments.
+Test dependencies are development-only and are not copied into the published site.
 
 ## Background
 Both data availability and access are important.  CARTA publishes all its open datasets using [datablob](https://pypi.org/project/datablob) in numerous file formats, including parquet.  After making data available, we wanted to drive down the friction in accessing and analyzing the data, so we created data.duckdb.  A single DuckDB database that points to all our open datasets.  It enables people to easily query, filter, and join all our open datasets.

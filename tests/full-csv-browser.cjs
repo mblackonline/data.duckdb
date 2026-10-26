@@ -1,15 +1,12 @@
 // Actual pinned engine, public data and real browser-owned filesystem streams.
-// Usage: node tests/full-csv-browser.cjs <temporary playwright-core prefix>
+// Usage: node tests/full-csv-browser.cjs
 // The save dialog is replaced with an isolated OPFS handle; no user files are touched.
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const http = require("node:http");
 const path = require("node:path");
-const { createRequire } = require("node:module");
+const { chromium } = require("playwright");
 const { readCsv } = require("./csv-export.test.cjs");
-assert(process.argv[2], "Provide a temporary prefix containing playwright-core.");
-const prefix = path.resolve(process.argv[2]);
-const { chromium } = createRequire(path.join(prefix, "verify.cjs"))("playwright-core");
 const root = path.join(__dirname, "..");
 const files = new Map([
   ["/", ["index.html", "text/html"]],
@@ -42,7 +39,7 @@ async function main() {
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   let browser;
   try {
-    browser = await chromium.launch({ executablePath: "C:/Program Files/Google/Chrome/Application/chrome.exe", headless: true });
+    browser = await chromium.launch({ headless: true });
     const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
     page.setDefaultTimeout(40000);
     const errors = []; let apiCalls = 0;
