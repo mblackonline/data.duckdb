@@ -66,6 +66,7 @@ function harness({ actualGenerator = false, authorized = true, storage = { getIt
     GROQ_MODELS: ["openai/gpt-oss-120b", "openai/gpt-oss-20b"],
     CARTA_NTD_ID: "40001",
     isOffTopicQuestion: () => false,
+    isDatasetDiscoveryQuestion: () => false,
     findStandardReport: () => null,
     validateCartaSql() {},
     normalizeReportSql: async (parsed, connection, sql) => ({ sql, ordered: true }),

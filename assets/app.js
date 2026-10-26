@@ -814,6 +814,7 @@
       const requestId = ++reportRequestId;
       currentRequestTitle = title;
       stopReportBtn.disabled = false;
+      if (currentReport?.isCatalog) quickSearchInput.value = "";
       clearResults();
       hideError();
       sqlQueryBox.value = "";
@@ -1321,6 +1322,35 @@
       }) || null;
     }
 
+    function isDatasetDiscoveryQuestion(question) {
+      const text = question.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+      const catalog = /\b(?:datasets?|databases?|tables?|data sources?)\b/.test(text);
+      const dataAvailability = /\bdata\b/.test(text) && /\b(?:available|query|access|have)\b/.test(text);
+      if (!catalog && !dataAvailability) return false;
+      // Leave dataset-specific filters, counts and other requirements to AI SQL generation.
+      const words = new Set(("show list display browse get give tell me us what which all the a an " +
+        "dataset datasets database databases table tables data source sources available availability " +
+        "carta public open for from in on this site website are is s do does you your have has " +
+        "can could would i we query access see use to please").split(" "));
+      return text.split(" ").every(word => words.has(word));
+    }
+
+    function showDatasetCatalog() {
+      currentColumns = ["Dataset", "Table", "Description"];
+      currentRows = availableViews.map(view => ({
+        Dataset: DATASET_INFO[view]?.label || view,
+        Table: `data.${view}`,
+        Description: DATASET_INFO[view]?.desc || "No description available."
+      }));
+      currentReport = { title: "CARTA datasets", isCatalog: true, elapsedMs: 0, truncated: false };
+      quickSearchInput.value = "";
+      quickSearchInput.disabled = currentRows.length === 0;
+      resultsFreshnessSummary.textContent = "Datasets listed in the connected CARTA catalog.";
+      resultsFreshness.textContent = "This list uses the catalog loaded for this browser session; it does not check source-data availability.";
+      resultsScope.textContent = "Select a dataset in the Visual Filter Builder to explore its records.";
+      applyQuickFilter();
+    }
+
     const sampleCache = {}; // viewName -> bounded samples, prioritizing temporal fields
     // Materialize parsed epochs before arithmetic: the pinned Wasm engine can
     // fail on the combined inline expression when input columns contain NULLs.
@@ -1497,6 +1527,12 @@ FROM parsed ORDER BY "trip_id";`;
           throw new Error(
             "Only questions about CARTA datasets (bus routes, stops, vehicle locations, predictions, trip delays, ridership, bike stations, parcels, or addresses) are supported."
           );
+        }
+
+        if (isDatasetDiscoveryQuestion(question)) {
+          showDatasetCatalog();
+          aiStatusText.textContent = "Dataset list ready (no AI request).";
+          return;
         }
 
         const standardReport = findStandardReport(question);

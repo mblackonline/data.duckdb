@@ -21,6 +21,10 @@ Open the [hosted explorer](https://carta-open-data-explorer-poc.netlify.app/).
 AI reporting requires Microsoft sign-in and staff authorization. Other reports
 remain public.
 
+The authorized assistant also accepts dataset-discovery questions such as
+"What datasets are available?" It lists names, table references and descriptions
+from the connected catalog locally, without sending an AI generation request.
+
 The explorer uses the catalog at upstream commit
 [`6452b5028cc570c4c4079d8d3fa8bf46002f4b02`](https://github.com/gocarta/data.duckdb/commit/6452b5028cc570c4c4079d8d3fa8bf46002f4b02),
 configured by `REMOTE_DUCKDB_URL` in `assets/app.js`. This pins the dataset

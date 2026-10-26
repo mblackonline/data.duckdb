@@ -10,6 +10,7 @@ function table(rows) { return { schema: { fields: Object.keys(rows[0] || {}).map
 function setup(options) {
   const h = harness(options);
   h.ui.VIEW_KEYWORDS = {};
+  h.ui.DATASET_INFO = { simple_bus_routes: { label: "Bus Routes", desc: "Route directory." } };
   h.ui.matchBestView = () => "gtfsrt_trip_updates_v1";
   h.ui.getColumnsForView = async () => [
     ...Array.from({ length: 15 }, (_, index) => ({ name: `field_${index}`, type: "VARCHAR" })),
@@ -24,6 +25,63 @@ function setup(options) {
   ].join("\n"), h.ui);
   return h;
 }
+
+test("catalog discovery accepts ordinary phrasing without swallowing specific data questions", () => {
+  const h = setup();
+  for (const question of [
+    "Show me all databases available for CARTA data", "What datasets are available?",
+    "Get me the available CARTA tables", "Can you list all datasets, please?",
+    "What data can I query?", "What data do you have?", "List CARTA data sources",
+    "Which databases are available?", "Available datasets"
+  ]) assert.equal(h.ui.isDatasetDiscoveryQuestion(question), true, question);
+  for (const question of [
+    "Show all bus stops", "Show all CARTA data", "Count all datasets",
+    "List datasets containing ridership", "Show tables with latitude",
+    "What fields are in bike stations?", "Get bike stations within 25 meters of Route 4",
+    "What databases are available in Azure?", "Show databases; DROP TABLE anything"
+  ]) assert.equal(h.ui.isDatasetDiscoveryQuestion(question), false, question);
+});
+
+test("the dataset-discovery question lists actual catalog entries locally and clears on sign-out", async () => {
+  const h = setup();
+  vm.runInContext("availableViews = ['simple_bus_routes', 'new_public_dataset'];", h.ui);
+  h.ui.quickSearchInput.value = "old report search";
+  h.ui.aiQuestionInput.value = "Show me all databases available for CARTA data";
+  await h.ask();
+  assert.equal(h.generations.length, 0); assert.equal(h.apiCalls.length, 0); assert.equal(h.queries.length, 0);
+  assert.deepEqual(h.state().rows, [
+    { Dataset: "Bus Routes", Table: "data.simple_bus_routes", Description: "Route directory." },
+    { Dataset: "new_public_dataset", Table: "data.new_public_dataset", Description: "No description available." }
+  ]);
+  assert.equal(h.state().report.title, "CARTA datasets");
+  assert.equal(h.ui.sqlQueryBox.value, ""); assert.equal(h.ui.reportPagination.hidden, true);
+  assert.equal(h.ui.exportCsvBtn.disabled, true); assert.equal(h.ui.quickSearchInput.disabled, false);
+  assert.equal(h.ui.quickSearchInput.value, "");
+  assert.match(h.ui.aiStatusText.textContent, /Dataset list ready/);
+  h.filter("Route directory"); assert.match(h.ui.resultsSummary.textContent, /1 of 2/);
+  const report = h.run("SELECT id FROM data.simple_bus_routes", "Public routes");
+  await new Promise(setImmediate); h.queries[0].resolve(table([{ id: "4" }])); await report;
+  assert.equal(h.ui.quickSearchInput.value, "");
+  assert.deepEqual(h.state().rows, [{ id: "4" }]);
+  await h.ask();
+  vm.runInContext('aiAuthorized = false; cancelStaffAi("Signed out.");', h.ui);
+  assert.deepEqual(h.state().rows, []); assert.equal(h.state().report, null);
+});
+
+test("a late AI report cannot replace a newer dataset list", async () => {
+  const h = setup(); h.ui.aiQuestionInput.value = "Compare monthly ridership by mode";
+  const old = h.ask(); await new Promise(setImmediate);
+  h.ui.aiQuestionInput.value = "What datasets are available?"; await h.ask();
+  h.generations[0].resolve({ sql: "SELECT * FROM data.simple_bus_routes" }); await old;
+  assert.equal(h.generations.length, 1); assert.equal(h.queries.length, 0);
+  assert.equal(h.state().report.title, "CARTA datasets");
+});
+
+test("dataset discovery through the AI assistant still requires authorization", async () => {
+  const h = setup({ authorized: false }); h.ui.aiQuestionInput.value = "List CARTA datasets";
+  await h.ask();
+  assert.equal(h.state().report, null); assert.equal(h.generations.length, 0); assert.equal(h.queries.length, 0);
+});
 
 test("unqualified standard report requests use exact tested queries without swallowing extra requirements", () => {
   const h = setup();
