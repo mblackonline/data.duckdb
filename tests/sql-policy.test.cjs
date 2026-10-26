@@ -1,10 +1,13 @@
-// Requires uv. DuckDB is used only to parse SQL, never to execute these test queries.
+// Uses the application's pinned Wasm parser. These SQL queries are parsed, never executed.
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
-const { spawnSync } = require("node:child_process");
+const { pathToFileURL } = require("node:url");
+const WebWorker = require("web-worker");
+const duckdb = require("@duckdb/duckdb-wasm");
+const dist = path.dirname(require.resolve("@duckdb/duckdb-wasm"));
 
 const root = path.join(__dirname, "..");
 const source = fs.readFileSync(path.join(root, "assets", "app.js"), "utf8");
@@ -75,19 +78,37 @@ const blocked = [
   ["non-SQL refusal", "UNSUPPORTED_QUERY"]
 ];
 
-const sqls = [...new Set([...allowed, ...blocked].map(([, sql]) => sql))];
-const python = "import sys,json,duckdb\nc=duckdb.connect()\nqueries=json.load(sys.stdin)\nprint(json.dumps({sql:json.loads(c.execute('SELECT json_serialize_sql(?)',[sql]).fetchone()[0]) for sql in queries}))\nc.close()";
-const parsed = spawnSync("uv", ["run", "--no-project", "--with", "duckdb==2.0.0", "python", "-c", python], {
-  cwd: root, input: JSON.stringify(sqls), encoding: "utf8", timeout: 60000, maxBuffer: 16 * 1024 * 1024
+let worker, db, parserConnection;
+test.before(async () => {
+  const version = JSON.parse(fs.readFileSync(path.join(dist, "..", "package.json"), "utf8")).version;
+  assert(source.includes(`@duckdb/duckdb-wasm@${version}/`), "The policy check and app must use the same DuckDB-Wasm version.");
+  const bundle = await duckdb.selectBundle({
+    mvp: { mainWorker: path.join(dist, "duckdb-node-mvp.worker.cjs"), mainModule: path.join(dist, "duckdb-mvp.wasm") },
+    eh: { mainWorker: path.join(dist, "duckdb-node-eh.worker.cjs"), mainModule: path.join(dist, "duckdb-eh.wasm") }
+  });
+  worker = new WebWorker(pathToFileURL(bundle.mainWorker), { type: "module" });
+  db = new duckdb.AsyncDuckDB(new duckdb.VoidLogger(), worker);
+  await db.instantiate(bundle.mainModule);
+  await db.open({ path: ":memory:", maximumThreads: 1 });
+  parserConnection = await db.connect();
+}, { timeout: 20000 });
+test.after(async () => {
+  try { if (parserConnection) await parserConnection.close(); }
+  finally {
+    try { if (db) await db.terminate(); }
+    finally { worker?.terminate(); }
+  }
 });
-assert.equal(parsed.status, 0, `Could not run the SQL-parser tests. Install uv and allow its DuckDB dependency download. ${parsed.error || parsed.stderr}`);
-const asts = JSON.parse(parsed.stdout);
 let closes = 0, boundSql = null;
 const context = {
   availableViews: views,
   conn: { prepare: async sql => {
     assert.equal(sql, "SELECT json_serialize_sql(CAST(? AS VARCHAR)) AS ast");
-    return { query: async value => { boundSql = value; return { toArray: () => [{ ast: JSON.stringify(asts[value]) }] }; }, close: async () => { closes++; } };
+    const statement = await parserConnection.prepare(sql);
+    return {
+      query: async value => { boundSql = value; return statement.query(value); },
+      close: async () => { closes++; await statement.close(); }
+    };
   } }
 };
 vm.createContext(context);
@@ -104,23 +125,23 @@ for (const [name, sql] of blocked) test("blocks " + name, async () => {
 test("rejects unrecognized parser structures", () => {
   assert.throws(() => context.validateCartaSqlAst({ statements: [{ node: { type: "UNKNOWN_NODE" } }] }, views));
 });
-test("accepts legacy CTE serialization used by the WebAssembly engine", () => {
-  const ast = structuredClone(asts[allowed.find(([name]) => name === "CTE")[1]]);
+test("accepts newer CTE serialization alongside the WebAssembly engine's format", async () => {
+  const ast = await context.validateCartaSql(allowed.find(([name]) => name === "CTE")[1]);
   for (const entry of ast.statements[0].node.cte_map.map) {
-    entry.value.query = { node: entry.value.query_node, named_param_map: [] };
-    delete entry.value.query_node;
+    entry.value.query_node = entry.value.query.node;
+    delete entry.value.query;
   }
   context.validateCartaSqlAst(ast, views);
 });
-test("accepts built-in main.date_part emitted by legacy EXTRACT parsing", () => {
-  const ast = structuredClone(asts[allowed.find(([name]) => name === "date parsing and arithmetic")[1]]);
+test("accepts built-in main.date_part emitted by legacy EXTRACT parsing", async () => {
+  const ast = await context.validateCartaSql(allowed.find(([name]) => name === "date parsing and arithmetic")[1]);
   const expression = ast.statements[0].node.select_list[0];
   expression.schema = "main";
   delete expression.qualified_name;
   context.validateCartaSqlAst(ast, views);
 });
-test("accepts legacy constant type metadata without treating it as a query node", () => {
-  const ast = structuredClone(asts[allowed.find(([name]) => name === "keywords and semicolons in values")[1]]);
+test("accepts legacy constant type metadata without treating it as a query node", async () => {
+  const ast = await context.validateCartaSql(allowed.find(([name]) => name === "keywords and semicolons in values")[1]);
   ast.statements[0].node.select_list[0].value = { type: { id: "VARCHAR", type_info: null }, is_null: false, value: "text" };
   context.validateCartaSqlAst(ast, views);
 });

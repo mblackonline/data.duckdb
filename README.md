@@ -31,8 +31,8 @@ limits and Excel guidance.
 
 ## Development checks
 
-Use Node.js 22.12 or later and npm. The regression and CSV checks also require
-Python 3 (`python` on PATH) and [uv](https://docs.astral.sh/uv/getting-started/installation/).
+Use Node.js 22.12 or later and npm. The CSV checks also require
+Python 3 (`python` on PATH). SQL-policy checks use the project's pinned Wasm parser.
 Run these commands from the repository root on Windows, macOS or Linux:
 
 ```sh
@@ -48,7 +48,7 @@ Browser installation needs network access; repeat it after upgrading Playwright.
 
 | Command | Checks | Network access |
 | --- | --- | --- |
-| `npm test` | Existing regression suite | First run may download the Python SQL-parser dependency |
+| `npm test` | Existing regression suite | None after setup |
 | `npm run test:browser` | Accessibility/UI and Microsoft session-cache fixtures | None after setup; external requests are mocked or blocked |
 | `npm run test:wasm` | Filter builder and query limits in the pinned Wasm engine | None after setup |
 | `npm run test:browser:live` | Public reports, timestamp calculations and full CSV exports | Public CDN, catalog and dataset access |
