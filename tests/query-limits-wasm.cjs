@@ -40,6 +40,22 @@ async function main() {
     let current = await engine();
     const { h, db } = current;
     console.log("WebAssembly engine:", await db.getVersion());
+    // Exercise the real paging/normalization path, not just SQL validation.
+    for (const comparison of [
+      "9007199254740993 = 9007199254740992",
+      "1.0000000000000001 = 1.0000000000000000"
+    ]) {
+      await h.runPage(`SELECT route_id FROM data.simple_bus_routes WHERE ${comparison} LIMIT 1`, "Exact comparison");
+      assert.deepEqual(h.state().rows, [], `Distinct SQL numbers must remain distinct: ${comparison}`);
+    }
+    await h.runPage(`SELECT CAST(9007199254740993 AS VARCHAR) AS big_integer,
+      CAST(1.0000000000000001 AS VARCHAR) AS precise_decimal
+      FROM data.simple_bus_routes LIMIT 1`, "Exact numeric literals");
+    assert.deepEqual(h.state().rows, [{ big_integer: "9007199254740993", precise_decimal: "1.0000000000000001" }]);
+    await h.export();
+    assert.match(await h.downloads.at(-1).text(), /9007199254740993,1\.0000000000000001/);
+    console.log("PASS: Paging and full CSV preserve exact large-integer and decimal SQL literals and comparisons");
+
     await h.run("SELECT route_id FROM data.simple_bus_routes ORDER BY route_id", "Rows");
     assert.equal(h.state().rows.length, 5000);
     assert.equal(h.state().report.truncated, true);

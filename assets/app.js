@@ -1459,10 +1459,12 @@ FROM parsed ORDER BY "trip_id";`;
       return parsed;
     }
 
-    async function normalizeReportSql(parsed, queryConnection) {
-      const statement = await queryConnection.prepare("SELECT json_deserialize_sql(CAST(? AS JSON)) AS sql");
+    async function normalizeReportSql(parsed, queryConnection, originalSql) {
+      // Keep the validated SQL's numeric literals inside DuckDB. A JavaScript
+      // JSON round-trip can round large integers and high-precision decimals.
+      const statement = await queryConnection.prepare("SELECT json_deserialize_sql(json_serialize_sql(CAST(? AS VARCHAR))) AS sql");
       try {
-        const result = await statement.query(JSON.stringify(parsed));
+        const result = await statement.query(originalSql);
         const sql = result.toArray()[0].sql;
         if (typeof sql !== "string" || !sql.trim()) throw reportLimitError("Could not prepare the report page.");
         return {

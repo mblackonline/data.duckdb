@@ -48,7 +48,7 @@ const fixtureModule = `
     },
     prepare: async statement => ({
       query: async value => statement.includes('json_deserialize_sql')
-        ? table([{sql: JSON.parse(value).fixtureSql.replace(/;\\s*$/, '')}])
+        ? table([{sql: value.replace(/;\\s*$/, '')}])
         : table([{ast: JSON.stringify({fixtureSql: value, statements: [{node: {
           type: 'SELECT_NODE', from_table: {type: 'BASE_TABLE', schema_name: 'data', table_name: 'simple_bus_routes'}, modifiers: []
         }}]})}]), close: async () => {}
